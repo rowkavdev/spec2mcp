@@ -344,13 +344,19 @@ function compileOutputValidator(schema) {
 export { compileOutputValidator };
 
 async function executeTool(manifest, tool, args, validateOutput) {
-  // A required parent is covered by a provided leaf (pet.id covers pet)
-  // and required leaves are covered by a provided parent (pet covers
-  // pet.id): the nullable parent arg coexists with its flattened leaves
-  // (#120), and either route puts the parent on the wire.
-  const provided = Object.keys(args).filter((k) => args[k] !== undefined);
-  const covered = (name) => provided.some((p) => p === name || p.startsWith(`${name}.`) || name.startsWith(`${p}.`));
-  const missing = tool.args.filter((a) => a.required && !covered(a.name)).map((a) => a.name);
+  // Only body parent/leaf paths can cover each other. Query/header/path
+  // args with the same visible prefix are separate wire parameters (#123).
+  const supplied = tool.args.filter((arg) => args[arg.name] !== undefined);
+  const prefix = (a, b) => a.length <= b.length && a.every((segment, i) => segment === b[i]);
+  const covered = (required) => supplied.some((given) => {
+    if (required.name === given.name) return true;
+    if (required.location !== 'body' || given.location !== 'body') return false;
+    const a = required.apiFieldPath;
+    const b = given.apiFieldPath;
+    return Array.isArray(a) && a.length > 0 && Array.isArray(b) && b.length > 0 &&
+      (prefix(a, b) || prefix(b, a));
+  });
+  const missing = tool.args.filter((arg) => arg.required && !covered(arg)).map((arg) => arg.name);
   if (missing.length > 0) {
     return errorResult(`Missing required argument(s): ${missing.join(', ')}`);
   }
