@@ -10,8 +10,8 @@ Everything below is unreleased; it becomes the 0.1.0 release notes.
 
 ### Added
 
-- **Generator MVP.** `spec2mcp generate` turns an OpenAPI 3.x spec (3.0 and 3.1
-  input, JSON or YAML, file or URL) into a standalone MCP server project through
+- **Generator MVP.** `spec2mcp generate` turns an OpenAPI 3.x spec (JSON or
+  YAML, file or URL) into a standalone MCP server project through
   a Forge transformer: external `$ref` bundling, synthesised and uniquified
   `operationId`s, and one MCP tool per operation with typed arguments taken from
   the spec. `spec2mcp serve` runs a spec directly without generating a project.
