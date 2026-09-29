@@ -308,6 +308,7 @@ function multipartFieldArg(field: MultipartField): ToolArg {
     return {
       name: field.name,
       location: 'body',
+      apiFieldPath: [],
       binary: true,
       required: field.required,
       schema: {
@@ -333,7 +334,7 @@ function multipartFieldArg(field: MultipartField): ToolArg {
   } else {
     schema.type = field.type;
   }
-  return { name: field.name, location: 'body', required: field.required, schema };
+  return { name: field.name, location: 'body', apiFieldPath: [], required: field.required, schema };
 }
 
 /** Content types declared on success (2xx or default) responses, in spec order. */
