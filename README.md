@@ -20,6 +20,8 @@ npx spec2mcp generate openapi.json --out ./petstore-mcp
 cd petstore-mcp && npm install && npm start
 ```
 
+To keep a generated project in sync while editing a local spec, run `spec2mcp generate openapi.json --out ./petstore-mcp --watch`. For a URL, `--watch` polls every 30 seconds by default; use `--poll-interval 60` to change that interval in seconds. Watch mode regenerates only when the spec content changes, retries failed generations, and prints errors to stderr while continuing to watch. It replaces the generated output directory on regeneration, so keep hand edits elsewhere. Stop with Ctrl+C. `serve` does not support `--watch`.
+
 Or skip the project and serve a spec directly over stdio:
 
 ```bash

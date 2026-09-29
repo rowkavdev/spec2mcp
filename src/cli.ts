@@ -12,6 +12,7 @@ import { init } from '../vendor/forge/index.js';
 import { loadSpec } from './load.js';
 import { buildManifest } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
+import { watchSpec } from './watch.js';
 
 const VERSION = '0.1.0';
 
@@ -29,6 +30,8 @@ Options:
   -o, --out <dir>                      Output directory (generate; default: ./<name>-mcp)
       --name <name>                    Server name (default: derived from the spec title)
       --base-url <url>                 Override the API base URL from the spec's servers list
+      --watch                          Regenerate when the spec changes (generate only)
+      --poll-interval <seconds>        URL polling period with --watch (default: 30)
   -h, --help                           Show this help
   -v, --version                        Show version
 
@@ -99,6 +102,8 @@ async function main(): Promise<void> {
       out: { type: 'string', short: 'o' },
       name: { type: 'string' },
       'base-url': { type: 'string' },
+      watch: { type: 'boolean' },
+      'poll-interval': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
     },
@@ -115,7 +120,17 @@ async function main(): Promise<void> {
   if (!spec) fail(`missing <spec> argument\n\n${HELP}`);
   const flags = { out: values.out, name: values.name, baseUrl: values['base-url'] };
 
-  if (command === 'serve') {
+  if (values['poll-interval'] && (!values.watch || !/^https?:\/\//i.test(spec))) {
+    fail('--poll-interval requires --watch and an HTTP(S) spec URL');
+  }
+  if (values.watch && command === 'serve') fail('--watch is only supported by generate');
+  if (values.watch) {
+    const seconds = values['poll-interval'] === undefined ? 30 : Number(values['poll-interval']);
+    if (!Number.isFinite(seconds) || seconds <= 0) fail('--poll-interval must be a positive number of seconds');
+    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags), { pollIntervalMs: seconds * 1000 });
+    process.once('SIGINT', () => { handle.close(); process.exit(0); });
+    process.once('SIGTERM', () => { handle.close(); process.exit(0); });
+  } else if (command === 'serve') {
     await cmdServe(spec, flags);
   } else {
     await cmdGenerate(spec, flags);
