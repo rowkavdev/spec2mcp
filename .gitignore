@@ -1,5 +1,18 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+*.tsbuildinfo
+
+# Test scratch
+.tmp-*/
+
+# Env / secrets
 .env
-*.log
+*.local
+
+# OS/editor
 .DS_Store
+.idea/
+.vscode/
