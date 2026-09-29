@@ -1,0 +1,19 @@
+# A valid 3.1 document with no paths at all - webhooks only.
+openapi: 3.1.0
+info:
+  title: Events Only
+  version: 0.1.0
+webhooks:
+  orderShipped:
+    post:
+      operationId: orderShipped
+      summary: An order shipped
+      responses:
+        '202':
+          description: Accepted
+  orderCancelled:
+    post:
+      summary: An order was cancelled
+      responses:
+        '202':
+          description: Accepted
