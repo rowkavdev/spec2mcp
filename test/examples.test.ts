@@ -55,7 +55,10 @@ for (const name of examples) {
           readFile(join(committed, file), 'utf8'),
           readFile(join(out, file), 'utf8'),
         ]);
-        assert.equal(actual, expected, `examples/${name}/${file} has drifted - regenerate it (see examples/README.md)`);
+        // Line endings are not meaningful drift: committed files may carry CRLF
+        // on a Windows checkout (core.autocrlf) while the generator emits LF.
+        const strip = (s: string) => s.replace(/\r\n/g, '\n');
+        assert.equal(strip(actual), strip(expected), `examples/${name}/${file} has drifted - regenerate it (see examples/README.md)`);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

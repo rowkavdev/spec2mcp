@@ -7,10 +7,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 
 const { compileOutputValidator } = (await import(
-  fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  new URL('../runtime/server.mjs', import.meta.url).href
 )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
 
 const PET_SCHEMA = {
