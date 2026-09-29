@@ -234,3 +234,23 @@ test('#95 oneOf and const root-null response schemas wrap under result', async (
   assert.equal(validateGhost({ result: null }), true, 'valid const null response');
   assert.equal(validateGhost({ result: { id: 'g' } }), false, 'non-null still rejected');
 });
+
+test('#102 oneOf object|array wraps so a valid root array is not isError', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const showBird = m.tools.find((t) => t.name === 'show_bird');
+  assert.ok(showBird);
+  assert.equal(showBird.outputWrap, true, 'root array admitted by oneOf wraps');
+  const result = (showBird.outputSchema?.properties as Record<string, unknown>).result;
+  assert.ok(result && typeof result === 'object' && 'oneOf' in (result as Record<string, unknown>), 'oneOf shape preserved under result');
+
+  const { compileOutputValidator } = (await import(
+    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
+  const validate = compileOutputValidator(showBird.outputSchema);
+  assert.equal(validate({ result: ['a', 'b'] }), true, 'valid root array response');
+  assert.equal(validate({ result: { id: 'b' } }), true, 'valid root object response');
+  assert.equal(validate({ result: 42 }), false, 'out-of-contract root still rejected');
+});

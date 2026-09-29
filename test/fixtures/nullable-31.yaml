@@ -112,3 +112,27 @@ paths:
             application/json:
               schema:
                 const: null
+  /birds/{birdId}:
+    get:
+      operationId: showBird
+      parameters:
+        - name: birdId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK - object or, for flocks, an array
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - type: array
+                    items:
+                      type: string
