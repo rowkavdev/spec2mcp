@@ -254,3 +254,22 @@ test('#102 oneOf object|array wraps so a valid root array is not isError', async
   assert.equal(validate({ result: { id: 'b' } }), true, 'valid root object response');
   assert.equal(validate({ result: 42 }), false, 'out-of-contract root still rejected');
 });
+
+test('#107 a constrained non-object oneOf branch wraps structurally', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const showFrog = m.tools.find((t) => t.name === 'show_frog');
+  assert.ok(showFrog);
+  // Finite value probes miss minItems; the branch walk must not.
+  assert.equal(showFrog.outputWrap, true, 'oneOf [object, array minItems] wraps');
+
+  const { compileOutputValidator } = (await import(
+    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
+  const validate = compileOutputValidator(showFrog.outputSchema);
+  assert.equal(validate({ result: ['a', 'b'] }), true, 'valid constrained root array');
+  assert.equal(validate({ result: { id: 'f' } }), true, 'valid root object');
+  assert.equal(validate({ result: [] }), false, 'constraint still enforced under the wrap');
+});

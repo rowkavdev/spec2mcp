@@ -5,7 +5,6 @@
  * interprets it is identical for every spec.
  */
 import type { OpenAPIV3 } from 'openapi-types';
-import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import {
   getAllOperationIds,
   resolveOperation,
@@ -375,36 +374,42 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   return shapes[0];
 }
 
-const rootProbe = new AjvJsonSchemaValidator();
+function isNonObjectValue(value: unknown): boolean {
+  return value === null || Array.isArray(value) || typeof value !== 'object';
+}
 
 /**
  * MCP structured content must be an object, so a schema that also admits a
  * non-object root - null, array or scalar, via type unions, anyOf, oneOf,
  * enum, const, not, or an unconstrained schema - takes the result wrap
- * (#92, #95, #102). These shapes hide behind many keywords, so probe the
- * dereferenced schema with the same validator the runtime uses instead of
- * enumerating keywords. Explicitly non-object schemas are already wrapped
- * via schemaIsObject; here representative non-object values plus the
- * schema's own enum/const probe object-capable shapes. An uncompilable
- * schema cannot prove a non-object root is valid; do not wrap on a guess,
- * matching the compile-time fallback. A deeply constrained variant (oneOf
- * [object, array with minItems]) can still slip past fixed probes; the
- * runtime then reports drift as a tool error, never a protocol violation.
+ * (#92, #95, #102). Walk the structure instead of sampling values (#107):
+ * finite probes miss constrained variants like oneOf [object, array with
+ * minItems]. Explicitly non-object schemas are already wrapped via
+ * schemaIsObject; this decides object-capable shapes. Typeless object
+ * keywords (properties, required) keep the OpenAPI object intent; a
+ * typeless "not" or fully unconstrained schema admits non-object roots.
  */
-function schemaAdmitsNonObjectRoot(schema: Record<string, unknown>): boolean {
-  const candidates: unknown[] = [null, [], ['x'], '', 'x', 0, 1, true, false];
-  if (Array.isArray(schema.enum)) candidates.push(...schema.enum);
-  if ('const' in schema) candidates.push(schema.const);
-  let validate: (value: unknown) => { valid: boolean };
-  try {
-    validate = rootProbe.getValidator(schema) as (value: unknown) => { valid: boolean };
-  } catch {
-    return false;
+function schemaAdmitsNonObjectRoot(schema: Record<string, unknown>, seen = new Set<unknown>()): boolean {
+  if (!schema || typeof schema !== 'object' || seen.has(schema)) return false;
+  seen.add(schema);
+  if (Array.isArray(schema.enum)) return schema.enum.some(isNonObjectValue);
+  if ('const' in schema) return isNonObjectValue(schema.const);
+  const t = schema.type;
+  if (typeof t === 'string') return t !== 'object';
+  if (Array.isArray(t)) return t.some((branch) => branch !== 'object');
+  if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
+    return schema.anyOf.some((branch) => schemaAdmitsNonObjectRoot(branch as Record<string, unknown>, seen));
   }
-  return candidates.some((value) => {
-    const nonObject = value === null || Array.isArray(value) || typeof value !== 'object';
-    return nonObject && validate(value).valid === true;
-  });
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+    return schema.oneOf.some((branch) => schemaAdmitsNonObjectRoot(branch as Record<string, unknown>, seen));
+  }
+  // allOf is an intersection: a non-object root must satisfy every branch.
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    return schema.allOf.every((branch) => schemaAdmitsNonObjectRoot(branch as Record<string, unknown>, seen));
+  }
+  if ('not' in schema) return true;
+  if ('properties' in schema || 'required' in schema) return false;
+  return true;
 }
 
 function schemaIsObject(schema: Record<string, unknown>): boolean {

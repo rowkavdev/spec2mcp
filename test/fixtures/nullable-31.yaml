@@ -136,3 +136,28 @@ paths:
                   - type: array
                     items:
                       type: string
+  /frogs/{frogId}:
+    get:
+      operationId: showFrog
+      parameters:
+        - name: frogId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK - object or a flock of at least two names
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - type: array
+                    minItems: 2
+                    items:
+                      type: string
