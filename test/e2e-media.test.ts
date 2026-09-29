@@ -201,3 +201,56 @@ test('a missing required file argument fails before any request is made', async 
   assert.match((result.content as { text: string }[])[0]!.text, /photo/);
   assert.equal(seen.length, 0);
 });
+
+test('image responses map to MCP image content', async () => {
+  seen.length = 0;
+  const result = await callTool('get_pet_photo', { petId: 7 });
+  assert.notEqual(result.isError, true);
+  const content = result.content as { type: string; data?: string; mimeType?: string }[];
+  assert.equal(content.length, 1);
+  assert.equal(content[0]!.type, 'image');
+  assert.equal(content[0]!.mimeType, 'image/png');
+  assert.equal(content[0]!.data, PNG_BYTES.toString('base64'));
+  assert.equal(seen[0]!.headers.accept, 'image/png', 'Accept comes from the declared response content types');
+});
+
+test('other binary responses map to MCP blob resources', async () => {
+  seen.length = 0;
+  const result = await callTool('get_pet_records', { petId: 7 });
+  assert.notEqual(result.isError, true);
+  const content = result.content as { type: string; resource?: { uri: string; mimeType: string; blob: string } }[];
+  assert.equal(content.length, 1);
+  assert.equal(content[0]!.type, 'resource');
+  const resource = content[0]!.resource!;
+  assert.equal(resource.mimeType, 'application/pdf');
+  assert.equal(resource.blob, PDF_BYTES.toString('base64'));
+  assert.match(resource.uri, /\/media\/pets\/7\/records$/);
+});
+
+test('binary responses over the byte cap are summarised, not shipped', async () => {
+  const result = await callTool('get_pet_photo', { petId: 999 });
+  assert.notEqual(result.isError, true);
+  const content = result.content as { type: string; text?: string }[];
+  assert.equal(content[0]!.type, 'text');
+  assert.match(content[0]!.text!, /binary response omitted: 6000 bytes of image\/png/);
+  assert.match(content[0]!.text!, /SPEC2MCP_MAX_BINARY_BYTES/);
+});
+
+test('large text responses are truncated with a notice', async () => {
+  const result = await callTool('export_pets', {});
+  assert.notEqual(result.isError, true);
+  const content = result.content as { type: string; text: string }[];
+  const text = content[0]!.text;
+  assert.ok(text.startsWith('id,name\n'), 'keeps the head of the response');
+  assert.match(text, /\[truncated: the response is \d+ characters; showing the first 10000\./);
+  assert.match(text, /SPEC2MCP_MAX_RESPONSE_CHARS/);
+  assert.ok(text.length < CSV_TEXT.length, 'the full body does not ship');
+});
+
+test('error responses carry the status and a truncated text body', async () => {
+  const result = await callTool('get_pet_photo', { petId: 404 });
+  assert.equal(result.isError, true);
+  const text = (result.content as { text: string }[])[0]!.text;
+  assert.match(text, /^HTTP 404 Not Found/);
+  assert.match(text, /not found/);
+});
