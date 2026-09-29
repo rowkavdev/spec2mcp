@@ -60,3 +60,23 @@ paths:
       responses:
         '201':
           description: Created
+  /pets/{petId}:
+    get:
+      operationId: showPet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK, or JSON null when the pet is gone
+          content:
+            application/json:
+              schema:
+                type: ["object", "null"]
+                required: [id]
+                properties:
+                  id:
+                    type: string

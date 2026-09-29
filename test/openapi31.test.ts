@@ -185,3 +185,26 @@ test('#87 allOf-flattened nullable body property keeps its null branch', async (
     'nullability survives the allOf flattening',
   );
 });
+
+test('#92 a root-nullable response schema wraps under result', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const showPet = m.tools.find((t) => t.name === 'show_pet');
+  assert.ok(showPet);
+  // MCP advertises one object-shaped schema per tool; a valid JSON null
+  // root cannot be structured content, so the nullable schema wraps.
+  assert.equal(showPet.outputWrap, true);
+  assert.equal(showPet.outputSchema?.type, 'object');
+  const result = (showPet.outputSchema?.properties as Record<string, unknown>).result as Record<string, unknown>;
+  assert.deepEqual(result?.type, ['object', 'null'], 'null root stays advertised under result');
+  assert.deepEqual(showPet.outputSchema?.required, ['result']);
+
+  const { compileOutputValidator } = (await import(
+    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
+  const validate = compileOutputValidator(showPet.outputSchema);
+  assert.equal(validate({ result: null }), true, 'valid JSON null response');
+  assert.equal(validate({ result: { id: 'a' } }), true, 'valid object response');
+});

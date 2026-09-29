@@ -373,6 +373,18 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   return shapes[0];
 }
 
+/**
+ * Root-level nullability (#92): a type union including null, or an anyOf
+ * with a null branch. A null root is a real response, and MCP structured
+ * content cannot express it unwrapped - such schemas take the result wrap.
+ */
+function schemaIsNullableRoot(schema: Record<string, unknown>): boolean {
+  const t = schema.type;
+  if (Array.isArray(t) && t.includes('null')) return true;
+  const anyOf = schema.anyOf;
+  return Array.isArray(anyOf) && anyOf.some((b) => (b as Record<string, unknown>)?.type === 'null');
+}
+
 function schemaIsObject(schema: Record<string, unknown>): boolean {
   const t = schema.type;
   if (typeof t === 'string') return t === 'object';
@@ -556,16 +568,18 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
 
     const responseSchema = successJsonSchema(op);
     if (responseSchema) {
-      // type must be the literal "object" (MCP clients validate it): a
-      // nullable top level collapses to object rather than a type union.
-      const candidate = schemaIsObject(responseSchema)
-        ? { ...responseSchema, type: 'object' }
-        : // MCP requires object-shaped structured content: wrap arrays and
-          // primitives under a single "result" property.
-          { type: 'object', properties: { result: responseSchema }, required: ['result'] };
+      // The advertised top-level type must be the literal "object" (MCP
+      // clients validate it). MCP requires object-shaped structured
+      // content, so arrays, primitives and root-nullable schemas (#92: a
+      // valid JSON null cannot be emitted unwrapped) go under a single
+      // "result" property; plain object schemas advertise as-is.
+      const wrap = !schemaIsObject(responseSchema) || schemaIsNullableRoot(responseSchema);
+      const candidate = wrap
+        ? { type: 'object', properties: { result: responseSchema }, required: ['result'] }
+        : { ...responseSchema, type: 'object' };
       if (JSON.stringify(candidate).length <= MAX_OUTPUT_SCHEMA_BYTES) {
         tool.outputSchema = candidate;
-        if (!schemaIsObject(responseSchema)) tool.outputWrap = true;
+        if (wrap) tool.outputWrap = true;
       }
       // Over-budget schemas (huge generated component trees) stay text-only.
     }
