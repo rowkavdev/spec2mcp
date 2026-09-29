@@ -238,3 +238,20 @@ test('operations with undeclared response bodies have no response content types'
   const getPet = m.tools.find((t) => t.name === 'get_legacy');
   assert.equal(getPet?.responseContentTypes, undefined);
 });
+
+test('#88 a 3.0.x body property typed as a union is collapsed, not dropped', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/union-30.yaml', import.meta.url)));
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const createPet = m.tools.find((t) => t.name === 'create_pet');
+  assert.ok(createPet);
+  const nickname = createPet.args.find((a) => a.name === 'nickname');
+  assert.ok(nickname, 'union-typed required field must not vanish from the manifest');
+  assert.equal(nickname.required, true);
+  assert.deepEqual(
+    (createPet.inputSchema.properties as Record<string, unknown>).nickname,
+    { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    'off-spec union normalizes to the #81 nullable form',
+  );
+});

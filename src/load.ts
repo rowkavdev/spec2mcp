@@ -79,10 +79,12 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
 
   // OpenAPI 3.1 upgrades schemas to JSON Schema 2020-12, where `type` may be
   // a union array. Forge reads `type` as a single string, so collapse unions
-  // before the document reaches the resolver.
-  if (typeof doc.openapi === 'string' && doc.openapi.startsWith('3.1')) {
-    collapseTypeArrays(doc);
-  }
+  // before the document reaches the resolver. The collapse runs for every
+  // version (#88): a union in a 3.0.x document is off-spec, but without the
+  // collapse Forge silently DROPS the property from the manifest - a
+  // required field vanishes, the worst failure mode. Collapsing normalizes
+  // the off-spec input into the same adapted form 3.1 gets.
+  collapseTypeArrays(doc);
 
   ensureOperationIds(doc);
   return doc;
