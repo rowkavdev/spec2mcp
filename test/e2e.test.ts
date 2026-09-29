@@ -195,6 +195,8 @@ test('tools/call without an outputSchema stays text-only', async () => {
   assert.equal(result.structuredContent, undefined);
   const content = result.content as { type: string; text: string }[];
   assert.match(content[0]!.text, /"ok": true/);
+});
+
 test('generated runtime reads project config to narrow tools and override server name/base URL', async () => {
   child.kill('SIGKILL');
   await writeFile(join(OUT, 'spec2mcp.config.json'), JSON.stringify({
