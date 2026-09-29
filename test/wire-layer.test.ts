@@ -61,6 +61,14 @@ before(async () => {
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
       tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
+      tool('queryArray', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
+      tool('queryExplode', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: true, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
+      tool('queryDeep', 'GET', [{ name: 'filter', location: 'query', style: 'deepObject', explode: true, required: false, schema: { type: 'object' } }]),
+      tool('queryPipe', 'GET', [{ name: 'tags', location: 'query', style: 'pipeDelimited', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
+      tool('headerArray', 'GET', [{ name: 'X-Tags', location: 'header', style: 'simple', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
+      { ...tool('pathArray', 'GET', [{ name: 'tags', location: 'path', style: 'simple', explode: false, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
+      { ...tool('pathLabel', 'GET', [{ name: 'tags', location: 'path', style: 'label', explode: true, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
+      { ...tool('pathMatrix', 'GET', [{ name: 'tags', location: 'path', style: 'matrix', explode: true, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
       tool('xml', 'POST', [{ ...bodyArg(), schema: { type: 'string' } }], 'application/xml'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
       { ...tool('getFile', 'GET', [{ name: 'name', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{name}/data' },
@@ -205,4 +213,32 @@ test('#82 XML needs pre-serialized XML, never JSON mislabeled as XML', async () 
   assert.equal(ok.isError, undefined);
   assert.equal(seen.at(-1)!.body.toString('utf8'), '<name>Alice</name>');
   assert.equal(seen.at(-1)!.headers['content-type'], 'application/xml');
+});
+
+test('#83 query, path and header arrays honor style/explode', async () => {
+  for (const [name, expected] of [['queryArray', 'tags=cat%2Cdog'], ['queryExplode', 'tags=cat&tags=dog']] as const) {
+    const response = await call(name, { tags: ['cat', 'dog'] });
+    assert.equal(response.isError, undefined);
+    assert.equal(new URL(seen.at(-1)!.url, 'http://localhost').search.slice(1).replace(/(?:^|&)tenant=customer|(?:^|&)api_key=secret-inline-key/g, '').replace(/^&|&$/g, ''), expected);
+  }
+  const header = await call('headerArray', { 'X-Tags': ['cat', 'dog'] });
+  assert.equal(header.isError, undefined);
+  assert.equal(seen.at(-1)!.headers['x-tags'], 'cat,dog');
+  const simple = await call('pathArray', { tags: ['cat', 'dog'] });
+  assert.equal(simple.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/path/cat,dog');
+  const label = await call('pathLabel', { tags: ['cat', 'dog'] });
+  assert.equal(label.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/path/.cat.dog');
+  const matrix = await call('pathMatrix', { tags: ['cat', 'dog'] });
+  assert.equal(matrix.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/path/;tags=cat;tags=dog');
+  const deep = await call('queryDeep', { filter: { name: 'Alice', count: 2 } });
+  assert.equal(deep.isError, undefined);
+  const deepQuery = new URL(seen.at(-1)!.url, 'http://localhost').searchParams;
+  assert.equal(deepQuery.get('filter[name]'), 'Alice');
+  assert.equal(deepQuery.get('filter[count]'), '2');
+  const pipe = await call('queryPipe', { tags: ['cat', 'dog'] });
+  assert.equal(pipe.isError, undefined);
+  assert.equal(new URL(seen.at(-1)!.url, 'http://localhost').searchParams.get('tags'), 'cat|dog');
 });

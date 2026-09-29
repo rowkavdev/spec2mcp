@@ -76,6 +76,8 @@ interface Parameter {
   required?: boolean;
   schema?: SchemaRef;
   description?: string;
+  style?: string;
+  explode?: boolean;
   'x-fern-parameter-name'?: string;
 }
 
@@ -85,6 +87,8 @@ interface ResolvedParameter {
   required?: boolean;
   schema?: SchemaRef;
   description?: string;
+  style?: string;
+  explode?: boolean;
   'x-fern-parameter-name'?: string;
 }
 
@@ -349,6 +353,9 @@ export interface ParameterInfo {
   required: boolean;
   /** Resolved JSON primitive/container type. */
   type: string;
+  /** OpenAPI serialization style/explode (defaults depend on location). */
+  style?: string;
+  explode?: boolean;
   /** Resolved array item type. */
   itemType?: string;
   /** Enum values from the resolved array item schema. */
@@ -526,10 +533,12 @@ function extractParameters(params: Parameter[] | undefined, location: 'path' | '
       const info: ParameterInfo = {
         name: p.name,
         required: p.required ?? false,
-        type: location === 'path' ? 'string' : extractType(resolvedSchema),
+        type: location === 'path' && resolvedSchema?.type !== 'array' && resolvedSchema?.type !== 'object' ? 'string' : extractType(resolvedSchema),
       };
       const sdkName = p['x-fern-parameter-name']?.trim();
       if (sdkName) info.sdkName = sdkName;
+      if (p.style !== undefined) info.style = p.style;
+      if (p.explode !== undefined) info.explode = p.explode;
       if (p.schema?.oneOf?.length || p.schema?.anyOf?.length) info.composed = true;
       if (resolvedSchema?.type === 'array') {
         const itemSchema = resolveParameterSchema(resolvedSchema.items);
