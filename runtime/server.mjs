@@ -252,7 +252,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
       path = path.replace(`{${arg.apiName ?? arg.name}}`, encodeURIComponent(String(value)));
     }
   }
-  const url = new URL(baseUrl.replace(/\/+$/, '') + path);
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}`;
   for (const arg of tool.args) {
     const value = args[arg.name];
     if (value === undefined) continue;

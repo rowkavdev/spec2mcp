@@ -123,3 +123,11 @@ test('#67 omitted optional body has no body or Content-Type; explicit empty obje
   assert.equal(seen.at(-1)!.headers['content-type'], 'application/json');
 });
 
+test('#68 base URL query stays a query while endpoint path appends to path', async () => {
+  const result = await call('blob');
+  assert.equal(result.isError, undefined);
+  const url = new URL(seen.at(-1)!.url, 'http://localhost');
+  assert.equal(url.pathname, '/api/blob');
+  assert.equal(url.searchParams.get('tenant'), 'customer');
+  assert.equal(url.searchParams.get('api_key'), credential);
+});
