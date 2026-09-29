@@ -19,8 +19,25 @@ export type AuthPlan = {
   baseUrlEnvVar: string;
 };
 
+/** Join prefix and scheme suffix without stutter: CLOUDFLARE_API + API_TOKEN
+ * becomes CLOUDFLARE_API_TOKEN, not CLOUDFLARE_API_API_TOKEN. */
+export function joinEnvName(prefix: string, suffix: string): string {
+  if (suffix.startsWith(`${prefix}_`)) return suffix;
+  const prefixParts = prefix.split('_');
+  const suffixParts = suffix.split('_');
+  let overlap = 0;
+  for (let k = Math.min(prefixParts.length, suffixParts.length); k > 0; k--) {
+    if (prefixParts.slice(-k).join('_') === suffixParts.slice(0, k).join('_')) {
+      overlap = k;
+      break;
+    }
+  }
+  const trimmed = suffixParts.slice(overlap).join('_');
+  return trimmed ? `${prefix}_${trimmed}` : prefix;
+}
+
 function mapScheme(name: string, def: OpenAPIV3.SecuritySchemeObject, envPrefix: string): AuthScheme | undefined {
-  const envVar = `${envPrefix}_${toEnvSuffix(name)}`;
+  const envVar = joinEnvName(envPrefix, toEnvSuffix(name));
   if (def.type === 'http' && def.scheme?.toLowerCase() === 'bearer') {
     return { kind: 'bearer', schemeName: name, envVar };
   }

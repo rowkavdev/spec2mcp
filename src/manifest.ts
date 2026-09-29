@@ -121,6 +121,7 @@ function extractWebhooks(doc: OpenAPIV3.Document): WebhookInfo[] {
 export type ManifestOptions = OperationFilters & {
   serverName?: string;
   baseUrl?: string;
+  envPrefix?: string;
 };
 
 const JSON_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
@@ -350,7 +351,7 @@ function collectResponseContentTypes(op: OperationInfo): string[] {
 export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {}): Manifest {
   const info = doc.info ?? ({ title: 'API', version: '0.0.0' } as OpenAPIV3.Document['info']);
   const apiTitle = info.title ?? 'API';
-  const envPrefix = toEnvPrefix(opts.serverName ?? apiTitle);
+  const envPrefix = opts.envPrefix ?? toEnvPrefix(opts.serverName ?? apiTitle);
   const { auth, forOperation } = buildAuthPlan(doc, envPrefix);
 
   const firstServer = doc.servers?.[0]?.url ?? '';
