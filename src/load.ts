@@ -78,6 +78,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   if (typeof components.schemas !== 'object' || components.schemas === null) components.schemas = {};
 
   sanitizeComponentKeys(doc);
+  hoistEscapedRefs(doc);
 
   // OpenAPI 3.1 upgrades schemas to JSON Schema 2020-12, where `type` may be
   // a union array. Forge reads `type` as a single string, so collapse unions
@@ -146,6 +147,83 @@ function sanitizeComponentKeys(doc: OpenAPIV3.Document): void {
     }
   };
   rewriteRefs(doc);
+}
+
+
+/**
+ * Deep escaped pointer segments (#112). sanitizeComponentKeys covers the
+ * component key itself; a $ref can also carry escaped segments BELOW it
+ * (`#/components/schemas/Foo/properties/a~1b`), which the vendored
+ * resolver's literal walk cannot follow. Hoist the target instead of
+ * patching vendored code: decode the pointer properly, copy the target
+ * into a synthetic escape-free component, and rewrite the $ref to point at
+ * it. The original document is untouched, so wire field names keep their
+ * exact spelling.
+ */
+function hoistEscapedRefs(doc: OpenAPIV3.Document): void {
+  const root = doc as unknown as Record<string, unknown>;
+  const components = root.components as Record<string, unknown> | undefined;
+  const schemas = components?.schemas as Record<string, unknown> | undefined;
+  if (!schemas || typeof schemas !== 'object') return;
+
+  const decodeSegment = (segment: string): string => segment.replaceAll('~1', '/').replaceAll('~0', '~');
+  const resolvePointer = (ref: string): unknown => {
+    if (!ref.startsWith('#/')) return undefined;
+    let cur: unknown = root;
+    for (const segment of ref.slice(2).split('/').map(decodeSegment)) {
+      if (!cur || typeof cur !== 'object') return undefined;
+      cur = (cur as Record<string, unknown>)[segment];
+    }
+    return cur;
+  };
+
+  // Pass 1: collect escaped refs and their synthetic names. Object key
+  // order makes the walk - and therefore the generated names - deterministic.
+  const rewrites = new Map<string, string>();
+  const collect = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) collect(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === '$ref' && typeof value === 'string' && value.includes('~') && !rewrites.has(value)) {
+        const target = resolvePointer(value);
+        if (target && typeof target === 'object') {
+          const tail = decodeSegment(value.split('/').pop() ?? 'ref').replace(/[^A-Za-z0-9_-]+/g, '_') || 'ref';
+          let name = `Hoisted_${tail}`;
+          let n = 2;
+          while (name in schemas) name = `Hoisted_${tail}_${n++}`;
+          schemas[name] = target;
+          rewrites.set(value, `#/components/schemas/${name}`);
+        }
+      } else {
+        collect(value);
+      }
+    }
+  };
+  collect(doc);
+  if (rewrites.size === 0) return;
+
+  // Pass 2: rewrite. Runs after the hoist, so synthetic components are not
+  // re-collected; refs inside them were already collected in pass 1.
+  const apply = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) apply(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const rec = node as Record<string, unknown>;
+    for (const [key, value] of Object.entries(rec)) {
+      if (key === '$ref' && typeof value === 'string') {
+        const replacement = rewrites.get(value);
+        if (replacement) rec.$ref = replacement;
+      } else {
+        apply(value);
+      }
+    }
+  };
+  apply(doc);
 }
 
 const JSON_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
