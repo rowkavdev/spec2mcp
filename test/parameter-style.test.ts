@@ -28,3 +28,14 @@ test('#83 manifest preserves parameter styles and explode from both component an
     { name: 'X-Ids', style: 'simple', explode: false, type: 'array' },
   ]);
 });
+
+test('#108 manifest preserves allowReserved on referenced query parameter', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Reserved', version: '1' },
+    components: { schemas: {}, parameters: { q: { name: 'q', in: 'query', allowReserved: true, schema: { type: 'string' } } } },
+    paths: { '/search': { get: { operationId: 'search', parameters: [{ $ref: '#/components/parameters/q' }],
+      responses: { '200': { description: 'OK' } } } } },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  assert.equal(buildManifest(doc).tools[0]!.args[0]?.allowReserved, true);
+});

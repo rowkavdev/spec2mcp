@@ -36,6 +36,7 @@ export type ToolArg = {
   /** OpenAPI parameter serialization (path/query/header). */
   style?: string;
   explode?: boolean;
+  allowReserved?: boolean;
   required: boolean;
   schema: Record<string, unknown>;
 };
@@ -487,13 +488,13 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
 
     const args: ToolArg[] = [];
     for (const p of op.pathParams) {
-      args.push({ name: p.name, location: 'path', required: true, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      args.push({ name: p.name, location: 'path', required: true, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.queryParams) {
-      args.push({ name: p.name, location: 'query', required: p.required, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      args.push({ name: p.name, location: 'query', required: p.required, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.headerParams) {
-      args.push({ name: p.name, location: 'header', required: p.required, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      args.push({ name: p.name, location: 'header', required: p.required, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
