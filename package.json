@@ -2,13 +2,24 @@
   "name": "spec2mcp",
   "version": "0.1.0",
   "description": "Turn any OpenAPI spec into a working MCP server with one command. Built as a transformer for Cloudflare's Forge generation pipeline.",
-  "keywords": ["mcp", "model-context-protocol", "openapi", "code-generation", "forge", "cloudflare", "ai-agents"],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "openapi",
+    "code-generation",
+    "forge",
+    "cloudflare",
+    "ai-agents"
+  ],
   "license": "MIT",
   "type": "module",
   "bin": {
     "spec2mcp": "dist/cli.mjs"
   },
-  "files": ["dist", "runtime"],
+  "files": [
+    "dist",
+    "runtime"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -22,6 +33,7 @@
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^15.1.0",
     "@modelcontextprotocol/sdk": "^1.31.0",
+    "jsonpath-plus": "^11.1.0",
     "openapi-format": "^1.33.5",
     "openapi-types": "^12.1.3",
     "yaml": "^2.9.0"
