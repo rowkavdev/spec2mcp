@@ -66,9 +66,11 @@ test('3.1 type unions collapse to Forge-readable types', async () => {
   const createPet = m.tools.find((t) => t.name === 'create_pet');
   assert.ok(createPet);
   const nickname = createPet.args.find((a) => a.name === 'nickname');
-  assert.equal(nickname?.schema.type, 'string', '["string", "null"] collapses to string');
+  // #81: the collapse keeps Forge's adapted view but the argument schema
+  // wraps it so input validation admits a valid null.
+  assert.deepEqual(nickname?.schema, { anyOf: [{ type: 'string' }, { type: 'null' }] }, '["string", "null"] keeps its null branch');
   const microchip = createPet.args.find((a) => a.name === 'microchipId');
-  assert.equal(microchip?.schema.type, 'number');
+  assert.deepEqual(microchip?.schema, { anyOf: [{ description: 'Optional chip id.', type: 'number' }, { type: 'null' }] }, '#81: nullable integer body property keeps its null branch');
 });
 
 test('custom jsonSchemaDialect is recorded on the manifest', async () => {
@@ -115,4 +117,55 @@ test('generate emits webhook and dialect sections and prints notes', async () =>
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+const NULLABLE31 = fileURLToPath(new URL('./fixtures/nullable-31.yaml', import.meta.url));
+
+test('#81 nullability survives the type-union collapse into the output schema', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const getPet = m.tools.find((t) => t.name === 'get_pet');
+  assert.ok(getPet?.outputSchema);
+  const props = getPet.outputSchema.properties as Record<string, Record<string, unknown>>;
+  assert.deepEqual(props.tag?.type, ['string', 'null'], 'nullable scalar becomes a type union');
+  assert.deepEqual(getPet.outputSchema.required, ['id', 'tag'], 'nullable is not optional');
+  assert.deepEqual(
+    props.rating?.anyOf,
+    [{ type: 'integer' }, { type: 'string' }, { type: 'null' }],
+    'multi-type union keeps its null branch',
+  );
+
+  // The runtime validator must accept the valid null responses the
+  // pre-#81 collapse rejected against the advertised schema.
+  const { compileOutputValidator } = (await import(
+    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
+  const validate = compileOutputValidator(getPet.outputSchema);
+  assert.equal(validate({ id: 'a', tag: null }), true, 'valid null response field');
+  assert.equal(validate({ id: 'a', tag: null, rating: null }), true, 'valid null union field');
+});
+
+test('#81 nullability survives into the request input schema', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const createPet = m.tools.find((t) => t.name === 'create_pet');
+  assert.ok(createPet);
+  const nickname = createPet.args.find((a) => a.name === 'nickname');
+  assert.equal(nickname?.required, true, 'nullable body property stays required');
+  assert.deepEqual(
+    (createPet.inputSchema.properties as Record<string, unknown>).nickname,
+    { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    'input schema admits a valid null',
+  );
+
+  // Forge's parameter view stays adapted: the nullable query param is a
+  // plain number argument, unchanged by the marker.
+  const getPet = m.tools.find((t) => t.name === 'get_pet');
+  const verbose = getPet?.args.find((a) => a.name === 'verbose');
+  assert.equal(verbose?.schema.type, 'number');
+  assert.equal(verbose?.required, false);
 });

@@ -99,6 +99,11 @@ function isJsonSchemaTypeArray(value: unknown): value is string[] {
  * `["string", "null"]` becomes `type: "string"` (a nullable parameter simply
  * is not required), and a union of several non-null types becomes an `anyOf`
  * of single-type branches, which the resolver already understands.
+ * Nullability must survive the collapse (#81): Forge ignores the OpenAPI
+ * `nullable` keyword, so it is safe to keep as a normalized internal marker,
+ * and the manifest's schema pipeline turns it back into the standard union
+ * form for advertised input/output schemas. Dropping it silently made the
+ * runtime reject valid null responses and null request fields.
  * `example`/`examples` subtrees hold payload data, not schemas - a property
  * named "type" there is user data and is left alone.
  */
@@ -110,12 +115,15 @@ function collapseTypeArrays(node: unknown): void {
   if (typeof node !== 'object' || node === null) return;
   const rec = node as Record<string, unknown>;
   if (isJsonSchemaTypeArray(rec.type)) {
+    const nullable = rec.type.includes('null');
     const nonNull = rec.type.filter((t) => t !== 'null');
     if (nonNull.length === 1) {
       rec.type = nonNull[0];
+      if (nullable) rec.nullable = true;
     } else if (nonNull.length > 1) {
       rec.anyOf = nonNull.map((t) => ({ type: t }));
       delete rec.type;
+      if (nullable) rec.nullable = true;
     }
   }
   for (const [key, value] of Object.entries(rec)) {
