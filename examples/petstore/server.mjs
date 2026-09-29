@@ -456,10 +456,16 @@ async function executeTool(manifest, tool, args, validateOutput) {
       method: tool.method,
       headers,
       body,
+      // Never forward credentials or request bodies to an upstream redirect target.
+      redirect: 'manual',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
     return errorResult(`Request failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (res.status >= 300 && res.status < 400) {
+    return errorResult(`HTTP ${res.status} redirect not followed to protect request credentials and body.`);
   }
 
   const contentType = baseContentType(res.headers.get('content-type'));
