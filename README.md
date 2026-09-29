@@ -89,7 +89,7 @@ Auth comes from the spec's security schemes. The generated `.env.example` names 
 | Stripe, Kubernetes (core/v1), Spotify, Vercel, Discord, Slack | 612 / 236 / 96 / 431 / 246 / 174 tools | Pinned snapshots verified in CI by the compat matrix (`test/compat.test.ts`), including tool shape and full project emission. Slack's snapshot is Swagger 2.0, pinning the 2.0 conversion path end to end. Refresh from live sources with `npm run compat:refresh`. |
 | Kubernetes aggregated Swagger 2.0 | 1,190 tools | 2.0 spec converted to 3.x in memory at load; pinned fixture test. |
 
-Those counts reflect the specs tested, not a guarantee that all later versions generate identical tools or that every endpoint was called. OpenAPI 3.1 input is covered by a fixture, but webhooks are not inbound MCP tools and some 3.1 schema features may not translate exactly. Swagger 2.0 inputs convert at load; 2.0 specs with external `$ref`s relative to the spec's own location are unsupported (the converted document exists only in memory). [Compatibility table](docs/guide.md#compatibility-and-limits).
+Those counts reflect the specs tested, not a guarantee that all later versions generate identical tools or that every endpoint was called. OpenAPI 3.1 input is covered by a fixture, but webhooks are not inbound MCP tools and some 3.1 schema features may not translate exactly. Swagger 2.0 inputs convert at load, with external `$ref`s resolved against the spec's own location first. [Compatibility table](docs/guide.md#compatibility-and-limits).
 
 ## Development
 

@@ -47,6 +47,17 @@ test('Kubernetes aggregated swagger.json (2.0) converts end to end', async () =>
   assert.equal(m.tools.length, 1190);
 });
 
+test('Swagger 2.0 external relative $refs resolve against the spec, not cwd (#51)', async () => {
+  // ./defs.yaml exists next to the spec but not at the process cwd, so a
+  // cwd-relative resolution ENOENTs.
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/swagger2-refs/main.json', import.meta.url)));
+  await init(doc);
+  const m = buildManifest(doc);
+  const tool = m.tools.find((t) => t.name === 'create_widget');
+  assert.ok(tool, 'tool generated from the sibling-ref operation');
+  assert.ok(tool.args.some((a) => a.name === 'name' || a.name === 'widget'), 'body schema from defs.yaml reached the manifest');
+});
+
 test('a document with neither openapi nor swagger keys is rejected', async () => {
   await assert.rejects(loadSpec(fileURLToPath(new URL('./fixtures/compat/expectations.json', import.meta.url))), /OpenAPI 3.x or Swagger 2.0/);
 });

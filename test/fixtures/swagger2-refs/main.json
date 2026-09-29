@@ -1,0 +1,22 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Sibling Refs API", "version": "1.0.0" },
+  "host": "api.sibling.test",
+  "schemes": ["https"],
+  "paths": {
+    "/widgets": {
+      "post": {
+        "operationId": "createWidget",
+        "parameters": [
+          { "name": "widget", "in": "body", "required": true, "schema": { "$ref": "./defs.yaml#/Widget" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Created.",
+            "schema": { "$ref": "./defs.yaml#/Widget" }
+          }
+        }
+      }
+    }
+  }
+}
