@@ -49,6 +49,7 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
           for (const index of [...indices].sort((a, b) => b - a)) parent.splice(index, 1);
         }
       } else if (update !== undefined) {
+        validateUpdate(update);
         for (const match of matches) {
           if (typeof match.value !== 'object' || match.value === null || Array.isArray(match.value)) {
             throw new Error(`Overlay ${name} action ${i + 1} target must resolve to an object for "update": ${target}`);
@@ -66,12 +67,27 @@ function deepMerge(target: Record<string, unknown>, update: unknown): void {
     throw new Error('Overlay "update" must be an object to merge into its target.');
   }
   for (const [key, value] of Object.entries(update)) {
-    const existing = target[key];
-    if (isPlainObject(existing) && isPlainObject(value)) deepMerge(existing as Record<string, unknown>, value);
+    const existing = Object.hasOwn(target, key) ? target[key] : undefined;
+    if (isPlainObject(existing) && isPlainObject(value)) deepMerge(existing, value);
     else target[key] = value;
   }
 }
 
+// Reject forbidden keys in the entire update before touching the document.
+// Arrays may contain object values even when the array itself replaces a node.
+function validateUpdate(value: unknown, seen = new WeakSet<object>()): void {
+  if (typeof value !== 'object' || value === null || seen.has(value)) return;
+  seen.add(value);
+  for (const [key, child] of Object.entries(value)) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+      throw new Error(`Overlay "update" contains forbidden key: ${key}`);
+    }
+    validateUpdate(child, seen);
+  }
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (typeof v !== 'object' || v === null) return false;
+  const prototype = Object.getPrototypeOf(v);
+  return prototype === Object.prototype || prototype === null;
 }
