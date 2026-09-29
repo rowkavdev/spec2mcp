@@ -140,7 +140,7 @@ test('#81 nullability survives the type-union collapse into the output schema', 
   // The runtime validator must accept the valid null responses the
   // pre-#81 collapse rejected against the advertised schema.
   const { compileOutputValidator } = (await import(
-    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+    new URL('../runtime/server.mjs', import.meta.url).href
   )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
   const validate = compileOutputValidator(getPet.outputSchema);
   assert.equal(validate({ id: 'a', tag: null }), true, 'valid null response field');
@@ -202,7 +202,7 @@ test('#92 a root-nullable response schema wraps under result', async () => {
   assert.deepEqual(showPet.outputSchema?.required, ['result']);
 
   const { compileOutputValidator } = (await import(
-    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+    new URL('../runtime/server.mjs', import.meta.url).href
   )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
   const validate = compileOutputValidator(showPet.outputSchema);
   assert.equal(validate({ result: null }), true, 'valid JSON null response');
@@ -215,7 +215,7 @@ test('#95 oneOf and const root-null response schemas wrap under result', async (
   const m = buildManifest(doc);
 
   const { compileOutputValidator } = (await import(
-    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+    new URL('../runtime/server.mjs', import.meta.url).href
   )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
 
   const showCat = m.tools.find((t) => t.name === 'show_cat');
@@ -247,7 +247,7 @@ test('#102 oneOf object|array wraps so a valid root array is not isError', async
   assert.ok(result && typeof result === 'object' && 'oneOf' in (result as Record<string, unknown>), 'oneOf shape preserved under result');
 
   const { compileOutputValidator } = (await import(
-    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+    new URL('../runtime/server.mjs', import.meta.url).href
   )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
   const validate = compileOutputValidator(showBird.outputSchema);
   assert.equal(validate({ result: ['a', 'b'] }), true, 'valid root array response');
@@ -266,7 +266,7 @@ test('#107 a constrained non-object oneOf branch wraps structurally', async () =
   assert.equal(showFrog.outputWrap, true, 'oneOf [object, array minItems] wraps');
 
   const { compileOutputValidator } = (await import(
-    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+    new URL('../runtime/server.mjs', import.meta.url).href
   )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
   const validate = compileOutputValidator(showFrog.outputSchema);
   assert.equal(validate({ result: ['a', 'b'] }), true, 'valid constrained root array');

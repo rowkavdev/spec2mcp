@@ -17,7 +17,7 @@ import { loadSpec } from '../src/load.js';
 import { buildManifest } from '../src/manifest.js';
 
 const { compileOutputValidator } = (await import(
-  fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  new URL('../runtime/server.mjs', import.meta.url).href
 )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/nullable-parent-31.yaml', import.meta.url));
