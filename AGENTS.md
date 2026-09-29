@@ -6,7 +6,7 @@ Turn any OpenAPI 3.x spec into a working MCP server. A transformer for Cloudflar
 
 - `src/` - CLI (`cli.ts`), spec loader (`load.ts`), auth mapping (`auth.ts`), manifest builder (`manifest.ts`), Forge transformer (`transformer.ts`), naming helpers (`naming.ts`).
 - `runtime/server.mjs` - plain-JS runtime copied verbatim into every generated project. The same file powers `spec2mcp serve`. Its only dependency is `@modelcontextprotocol/sdk`. Never write to stdout here - stdout is the MCP protocol channel.
-- `vendor/forge/` - pinned `@cloudflare/forge` source (Apache-2.0). Do not edit; refresh with `scripts/sync-forge.sh <ref>`.
+- `vendor/forge/` - pinned `@cloudflare/forge` source (Apache-2.0). Do not edit casually; to update, re-vendor the pinned upstream `packages/forge` source and retain `vendor/forge/LICENSE` and `PINNED.md` attribution.
 - `test/` - node:test. Unit tests use fixture specs; `e2e.test.ts` boots a generated server and drives a real MCP session against a mock HTTP API.
 - `examples/live-github.mjs` - manual live-API dogfood (not run in CI).
 

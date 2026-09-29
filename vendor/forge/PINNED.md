@@ -6,4 +6,10 @@ Licence: Apache-2.0 (see LICENSE in this directory), copyright Cloudflare, Inc.
 
 Vendored because `@cloudflare/forge` is not yet published to npm. When it is,
 this directory gets replaced by the npm dependency. Test files were dropped;
-everything else is verbatim. Update with `scripts/sync-forge.sh`.
+everything else is verbatim. There is no automated sync script: the previous
+script used a placeholder URL and an unverified fallback, which could silently
+replace this pinned source with a different revision. For an update, check out
+the desired full upstream commit, replace this package source from
+`packages/forge` (excluding tests), copy the upstream Apache-2.0 LICENSE,
+update the pinned commit here, and run typecheck, build, and tests. Review the
+vendored diff before committing; keep attribution and the license.
