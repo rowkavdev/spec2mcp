@@ -75,7 +75,7 @@ for (const spec of expectations.specs) {
     const files = await forge.transform(createMcpTransformer(doc, { runtimeSource }));
     assert.deepEqual(
       files.map((f) => f.path),
-      ['operations.json', 'server.mjs', 'package.json', 'README.md', '.env.example', '.gitignore'],
+      ['operations.json', 'spec2mcp.config.json', 'server.mjs', 'package.json', 'README.md', '.env.example', '.gitignore'],
     );
     const emitted = JSON.parse(files.find((f) => f.path === 'operations.json')!.content) as Manifest;
     assert.equal(emitted.tools.length, spec.tools);
