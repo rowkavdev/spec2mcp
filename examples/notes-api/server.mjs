@@ -240,6 +240,18 @@ function parameterParts(arg, value) {
   }
   return [scalar(value)];
 }
+/** Reserved expansion, with query syntax delimiters kept percent-encoded. */
+function encodeReservedQueryValue(value) {
+  return encodeURIComponent(value)
+    .replace(/%[0-9A-F]{2}/gi, (escape) => {
+      const char = String.fromCharCode(Number.parseInt(escape.slice(1), 16));
+      // &[+#[ ] and percent not part of an encoded triple must remain encoded.
+      return '/?:@$,;='.includes(char) ? char : escape;
+    })
+    // RFC6570 reserved expansion keeps already-encoded triples intact.
+    .replace(/%25([0-9A-F]{2})/gi, '%$1');
+}
+
 function pathParameter(arg, value) {
   const style = parameterStyle(arg);
   const explode = arg.explode ?? false;
@@ -356,6 +368,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
   }
   let url;
   let headers;
+  const reservedQuery = [];
   try {
     url = new URL(baseUrl);
     url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}`;
@@ -367,11 +380,10 @@ async function executeTool(manifest, tool, args, validateOutput) {
         const style = parameterStyle(arg);
         const parts = parameterParts(arg, value);
         for (const part of parts) {
-          if (Array.isArray(part)) {
-            url.searchParams.append(style === 'deepObject' ? `${wireName}[${part[0]}]` : part[0], part[1]);
-          } else {
-            url.searchParams.append(wireName, part);
-          }
+          const key = Array.isArray(part) ? (style === 'deepObject' ? `${wireName}[${part[0]}]` : part[0]) : wireName;
+          const item = Array.isArray(part) ? part[1] : part;
+          if (arg.allowReserved === true) reservedQuery.push([key, item]);
+          else url.searchParams.append(key, item);
         }
       }
     }
@@ -386,6 +398,17 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }
 
     applyAuth(manifest, tool, url, headers);
+    // Append only after every searchParams mutation: URLSearchParams re-encodes
+    // the entire query, erasing reserved expansion. API-key params keep priority.
+    const activeQueryKeys = new Set((manifest.auth?.schemes ?? [])
+      .filter((scheme) => scheme.kind === 'apikey-query' && process.env[scheme.envVar] &&
+        (tool.authSchemeNames === undefined || tool.authSchemeNames.includes(scheme.schemeName)))
+      .map((scheme) => scheme.queryName));
+    for (const [key, item] of reservedQuery) {
+      if (activeQueryKeys.has(key)) continue;
+      const pair = `${encodeURIComponent(key)}=${encodeReservedQueryValue(item)}`;
+      url.search += `${url.search ? '&' : ''}${pair}`;
+    }
   } catch {
     return errorResult('Invalid request URL or header argument.');
   }

@@ -78,6 +78,7 @@ interface Parameter {
   description?: string;
   style?: string;
   explode?: boolean;
+  allowReserved?: boolean;
   'x-fern-parameter-name'?: string;
 }
 
@@ -89,6 +90,7 @@ interface ResolvedParameter {
   description?: string;
   style?: string;
   explode?: boolean;
+  allowReserved?: boolean;
   'x-fern-parameter-name'?: string;
 }
 
@@ -356,6 +358,7 @@ export interface ParameterInfo {
   /** OpenAPI serialization style/explode (defaults depend on location). */
   style?: string;
   explode?: boolean;
+  allowReserved?: boolean;
   /** Resolved array item type. */
   itemType?: string;
   /** Enum values from the resolved array item schema. */
@@ -539,6 +542,7 @@ function extractParameters(params: Parameter[] | undefined, location: 'path' | '
       if (sdkName) info.sdkName = sdkName;
       if (p.style !== undefined) info.style = p.style;
       if (p.explode !== undefined) info.explode = p.explode;
+      if (p.allowReserved !== undefined) info.allowReserved = p.allowReserved;
       if (p.schema?.oneOf?.length || p.schema?.anyOf?.length) info.composed = true;
       if (resolvedSchema?.type === 'array') {
         const itemSchema = resolveParameterSchema(resolvedSchema.items);

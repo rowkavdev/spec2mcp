@@ -64,6 +64,8 @@ before(async () => {
       { ...tool('formCsv', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'form', explode: false } } },
       { ...tool('formUnsupported', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'deepObject' } } },
       tool('queryArray', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
+      tool('reserved', 'GET', [{ name: 'q', location: 'query', allowReserved: true, required: false, schema: { type: 'string' } }]),
+      tool('reservedKeyCollision', 'GET', [{ name: 'api_key', location: 'query', allowReserved: true, required: false, schema: { type: 'string' } }]),
       tool('queryExplode', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: true, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
       tool('queryDeep', 'GET', [{ name: 'filter', location: 'query', style: 'deepObject', explode: true, required: false, schema: { type: 'object' } }]),
       tool('queryPipe', 'GET', [{ name: 'tags', location: 'query', style: 'pipeDelimited', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
@@ -256,4 +258,16 @@ test('#86 form property explode:false sends one CSV field, not repeated keys', a
   assert.equal(unsupported.isError, true);
   assert.match(unsupported.content[0].text, /Unsupported form encoding/);
   assert.equal(seen.length, count);
+});
+
+test('#108 allowReserved leaves safe reserved characters but encodes delimiters', async () => {
+  const response = await call('reserved', { q: 'a/b?c:d&x+y#z[0]=%2F' });
+  assert.equal(response.isError, undefined);
+  const wire = seen.at(-1)!.url;
+  assert.match(wire, /q=a\/b\?c:d%26x%2By%23z%5B0%5D=%2F/);
+  assert.equal(new URL(wire, 'http://localhost').searchParams.get('q'), 'a/b?c:d&x+y#z[0]=/');
+  assert.equal(new URL(wire, 'http://localhost').searchParams.get('x+y'), null);
+  const key = await call('reservedKeyCollision', { api_key: 'evil/leak' });
+  assert.equal(key.isError, undefined);
+  assert.deepEqual(new URL(seen.at(-1)!.url, 'http://localhost').searchParams.getAll('api_key'), [credential]);
 });
