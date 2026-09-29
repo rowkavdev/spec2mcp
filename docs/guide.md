@@ -144,7 +144,7 @@ An operation's `security` takes priority over root `security`; `security: []` me
 | Multipart forms, binary responses | Multipart form fields and base64 file inputs; binary response content maps to MCP media/resource types with size caps. |
 | Authentication | Environment-based HTTP bearer/basic, header/query API keys, pre-minted OAuth/OIDC bearer token; no token acquisition or refresh. |
 | stdio and Streamable HTTP | Supported; HTTP is loopback-only and has no MCP-client authentication. |
-| Large specs | GitHub REST (1,231 tools, live-called) and Cloudflare API (3,469 tools, ~9s) verified during development; Stripe, Kubernetes, Spotify and Vercel are pinned CI compat fixtures (612/236/96/431 tools, exact counts and tool shape asserted). Client-side listing size/performance still depends on the MCP client. |
+| Large specs | GitHub REST (1,231 tools, live-called) and Cloudflare API (3,469 tools, ~9s) verified during development; Stripe, Kubernetes, Spotify, Vercel, Discord and Slack are pinned CI compat fixtures (612/236/96/431/246/174 tools, exact counts and tool shape asserted; Slack's snapshot is Swagger 2.0, pinning the conversion path end to end). Client-side listing size/performance still depends on the MCP client. |
 
 Live-call coverage beyond GitHub is not asserted, so do not assume every endpoint or security flow was exercised. Generated code is inspectable and should be reviewed before giving it credentials. Cloudflare [Code Mode](https://developers.cloudflare.com/agents/model-context-protocol/guides/build-codemode-openapi-mcp-server/) is another OpenAPI-to-MCP approach; spec2mcp's difference is the standalone project that you own and deploy.
 
