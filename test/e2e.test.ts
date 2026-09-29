@@ -48,7 +48,8 @@ before(async () => {
     req.on('end', () => {
       seen.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body });
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      const isList = req.method === 'GET' && (req.url === '/v1/pets' || (req.url ?? '').startsWith('/v1/pets?'));
+      res.end(JSON.stringify(isList ? [{ id: 1, name: 'Rex' }] : { ok: true }));
     });
   });
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
@@ -163,4 +164,35 @@ test('missing required arg returns a tool error without calling the API', async 
 test('unknown tool returns a tool error', async () => {
   const res = await rpc('tools/call', { name: 'nope', arguments: {} });
   assert.equal((res.result as Record<string, unknown>).isError, true);
+});
+
+test('tools/list advertises outputSchema only where the spec declares one', async () => {
+  const res = await rpc('tools/list');
+  const tools = (res.result as Record<string, unknown>).tools as { name: string; outputSchema?: Record<string, unknown> }[];
+  const getPet = tools.find((t) => t.name === 'get_pet');
+  assert.equal(getPet?.outputSchema?.type, 'object');
+  const legacy = tools.find((t) => t.name === 'get_legacy');
+  assert.equal(legacy?.outputSchema, undefined);
+});
+
+test('tools/call returns structuredContent for an object response', async () => {
+  const res = await rpc('tools/call', { name: 'get_pet', arguments: { petId: 7 } });
+  const result = res.result as Record<string, unknown>;
+  assert.deepEqual(result.structuredContent, { ok: true });
+  const content = result.content as { type: string; text: string }[];
+  assert.match(content[0]!.text, /"ok": true/, 'text content kept alongside structuredContent');
+});
+
+test('tools/call wraps an array response under result', async () => {
+  const res = await rpc('tools/call', { name: 'list_pets', arguments: {} });
+  const result = res.result as Record<string, unknown>;
+  assert.deepEqual(result.structuredContent, { result: [{ id: 1, name: 'Rex' }] });
+});
+
+test('tools/call without an outputSchema stays text-only', async () => {
+  const res = await rpc('tools/call', { name: 'get_legacy', arguments: {} });
+  const result = res.result as Record<string, unknown>;
+  assert.equal(result.structuredContent, undefined);
+  const content = result.content as { type: string; text: string }[];
+  assert.match(content[0]!.text, /"ok": true/);
 });
