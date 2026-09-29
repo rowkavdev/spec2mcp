@@ -20,6 +20,20 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_CHARS = 50_000;
+const DEFAULT_MAX_BINARY_BYTES = 4 * 1024 * 1024;
+
+function envLimit(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Text responses longer than this are truncated (SPEC2MCP_MAX_RESPONSE_CHARS). */
+const MAX_RESPONSE_CHARS = envLimit('SPEC2MCP_MAX_RESPONSE_CHARS', DEFAULT_MAX_RESPONSE_CHARS);
+/** Binary payloads larger than this are summarised instead of returned (SPEC2MCP_MAX_BINARY_BYTES). */
+const MAX_BINARY_BYTES = envLimit('SPEC2MCP_MAX_BINARY_BYTES', DEFAULT_MAX_BINARY_BYTES);
 
 /** Raised when a tool argument cannot be encoded into the request body. */
 class ToolArgumentError extends Error {}
@@ -121,6 +135,50 @@ function applyAuth(manifest, tool, url, headers) {
   return null;
 }
 
+/** The response content-type, lower-cased, without any charset parameter. */
+function baseContentType(headerValue) {
+  return (headerValue ?? '').split(';', 1)[0].trim().toLowerCase();
+}
+
+function isJsonType(contentType) {
+  return contentType === 'application/json' || contentType.endsWith('+json');
+}
+
+/** Types safely rendered as text (and truncated) rather than as binary content. */
+function isTextLikeType(contentType) {
+  return (
+    contentType === '' ||
+    isJsonType(contentType) ||
+    contentType.startsWith('text/') ||
+    contentType === 'application/xml' ||
+    contentType.endsWith('+xml') ||
+    contentType === 'application/javascript' ||
+    contentType === 'image/svg+xml' ||
+    contentType === 'application/x-www-form-urlencoded'
+  );
+}
+
+/** SVG is text; every other image type maps to MCP image content. */
+function isImageType(contentType) {
+  return contentType.startsWith('image/') && contentType !== 'image/svg+xml';
+}
+
+function isAudioType(contentType) {
+  return contentType.startsWith('audio/');
+}
+
+function truncateText(text) {
+  if (text.length <= MAX_RESPONSE_CHARS) return text;
+  return `${text.slice(0, MAX_RESPONSE_CHARS)}\n\n[truncated: the response is ${text.length} characters; showing the first ${MAX_RESPONSE_CHARS}. Set SPEC2MCP_MAX_RESPONSE_CHARS to raise the limit.]`;
+}
+
+/** Replace the response body when it is too large to ship back as base64. */
+function oversizedBinaryResult(byteLength, contentType) {
+  return textResult(
+    `[binary response omitted: ${byteLength} bytes of ${contentType || 'unknown type'} exceeds the ${MAX_BINARY_BYTES}-byte limit. Set SPEC2MCP_MAX_BINARY_BYTES to raise it.]`,
+  );
+}
+
 async function executeTool(manifest, tool, args) {
   const missing = tool.args.filter((a) => a.required && args[a.name] === undefined).map((a) => a.name);
   if (missing.length > 0) {
@@ -158,7 +216,8 @@ async function executeTool(manifest, tool, args) {
   }
 
   const headers = new Headers();
-  headers.set('accept', 'application/json');
+  const declaredResponses = tool.responseContentTypes;
+  headers.set('accept', declaredResponses && declaredResponses.length > 0 ? declaredResponses.join(', ') : 'application/json');
   for (const arg of tool.args) {
     const value = args[arg.name];
     if (value === undefined || arg.location !== 'header') continue;
@@ -207,32 +266,54 @@ async function executeTool(manifest, tool, args) {
     return errorResult(`Request failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const text = await res.text();
-  let rendered = text;
-  let parsed;
-  const contentType = res.headers.get('content-type') ?? '';
-  if (contentType.includes('json') && text.length > 0) {
-    try {
-      parsed = JSON.parse(text);
-      rendered = JSON.stringify(parsed, null, 2);
-    } catch {
-      rendered = text;
-    }
-  }
+  const contentType = baseContentType(res.headers.get('content-type'));
+  const bytes = Buffer.from(await res.arrayBuffer());
+
   if (!res.ok) {
-    return errorResult(`HTTP ${res.status} ${res.statusText}\n${rendered}`.trim());
+    const detail = isTextLikeType(contentType)
+      ? truncateText(renderText(bytes, contentType))
+      : `[binary body: ${bytes.length} bytes of ${contentType || 'unknown type'}]`;
+    return errorResult(`HTTP ${res.status} ${res.statusText}\n${detail}`.trim());
   }
-  const result = textResult(rendered.length > 0 ? rendered : `(empty response, HTTP ${res.status})`);
+
+  if (bytes.length === 0) {
+    return textResult(`(empty response, HTTP ${res.status})`);
+  }
+  if (isImageType(contentType) || isAudioType(contentType)) {
+    if (bytes.length > MAX_BINARY_BYTES) return oversizedBinaryResult(bytes.length, contentType);
+    return { content: [{ type: isImageType(contentType) ? 'image' : 'audio', data: bytes.toString('base64'), mimeType: contentType }] };
+  }
+  if (!isTextLikeType(contentType)) {
+    if (bytes.length > MAX_BINARY_BYTES) return oversizedBinaryResult(bytes.length, contentType);
+    return {
+      content: [
+        {
+          type: 'resource',
+          resource: { uri: url.toString(), mimeType: contentType || 'application/octet-stream', blob: bytes.toString('base64') },
+        },
+      ],
+    };
+  }
+
+  const result = textResult(truncateText(renderText(bytes, contentType)));
   // Tools with a manifest outputSchema also return structuredContent (MCP
   // spec). The text content stays for clients without structured support.
   // Degrade silently to text-only when the body didn't parse as JSON or the
   // API returned a shape the schema can't hold.
-  if (tool.outputSchema && parsed !== undefined) {
+  if (tool.outputSchema && isJsonType(contentType)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      parsed = undefined;
+    }
     let structured;
-    if (tool.outputWrap) {
-      structured = { result: parsed ?? null };
-    } else if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      structured = parsed;
+    if (parsed !== undefined) {
+      if (tool.outputWrap) {
+        structured = { result: parsed ?? null };
+      } else if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        structured = parsed;
+      }
     }
     if (structured) result.structuredContent = structured;
   }
@@ -261,6 +342,19 @@ function withConfig(manifest, config) {
     baseUrl: config.baseUrl ?? manifest.baseUrl,
     tools: manifest.tools.filter((tool) => selected(tool, config)),
   };
+}
+
+/** Decode a text response body, pretty-printing JSON payloads. */
+function renderText(bytes, contentType) {
+  const text = bytes.toString('utf8');
+  if (isJsonType(contentType) && text.length > 0) {
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
+  }
+  return text;
 }
 
 function createMcpServer(manifest) {
