@@ -1,0 +1,126 @@
+openapi: 3.0.3
+info:
+  title: Pet Store
+  version: 1.2.3
+  description: A small but realistic fixture API.
+servers:
+  - url: https://api.petstore.test/v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    apiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+  schemas:
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The pet's name
+        tag:
+          type: string
+        address:
+          type: object
+          properties:
+            street:
+              type: string
+            city:
+              type: string
+          required: [street]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List all pets
+      description: List all pets in the store.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [cat, dog, fish]
+      responses:
+        '200':
+          description: ok
+    post:
+      operationId: createPet
+      summary: Create a pet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPet'
+      responses:
+        '201':
+          description: created
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      summary: Get one pet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: ok
+    delete:
+      operationId: deletePet
+      summary: Delete a pet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: X-Confirm
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: gone
+  /uploads:
+    post:
+      operationId: uploadFile
+      summary: Upload a raw file
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: ok
+  /legacy:
+    get:
+      summary: Legacy endpoint without an operationId
+      responses:
+        '200':
+          description: ok
+  /search:
+    get:
+      operationId: listPets
+      summary: Search pets (duplicate operationId on purpose)
+      responses:
+        '200':
+          description: ok

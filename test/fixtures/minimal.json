@@ -1,0 +1,13 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Tiny", "version": "0.0.1" },
+  "paths": {
+    "/status": {
+      "get": {
+        "operationId": "getStatus",
+        "summary": "Service status",
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  }
+}
