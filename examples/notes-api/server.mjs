@@ -107,6 +107,18 @@ function filePart(arg, value) {
   return { bytes, filename, mimeType };
 }
 
+/** Decode a canonical base64 body before fetch can coerce it to UTF-8. */
+function binaryBody(value) {
+  if (typeof value !== 'string' || !BASE64_RE.test(value)) {
+    throw new ToolArgumentError('Argument "body" must be a canonical base64 string (no whitespace, correct padding).');
+  }
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.toString('base64') !== value) {
+    throw new ToolArgumentError('Argument "body" does not round-trip as base64; refusing to send corrupt data.');
+  }
+  return bytes;
+}
+
 /**
  * Encode body arguments as a real multipart/form-data payload. Binary args
  * become file parts; object/array args are JSON-serialised into their form
@@ -282,7 +294,16 @@ async function executeTool(manifest, tool, args, validateOutput) {
         tool.args.some((a) => a.location === 'body' && a.name === 'body' && (!a.apiFieldPath || a.apiFieldPath.length === 0)))
     ) {
       const raw = args.body;
-      body = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {});
+      if (tool.contentType && !isTextLikeType(baseContentType(tool.contentType))) {
+        try {
+          body = binaryBody(raw);
+        } catch (err) {
+          if (err instanceof ToolArgumentError) return errorResult(err.message);
+          throw err;
+        }
+      } else {
+        body = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {});
+      }
     } else {
       const obj = {};
       for (const arg of tool.args) {

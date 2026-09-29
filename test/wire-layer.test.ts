@@ -93,3 +93,22 @@ test('#64 inline binary resources use opaque URIs, not upstream URLs carrying AP
   assert.equal(new URL(request.url, 'http://localhost').searchParams.get('api_key'), credential);
 });
 
+test('#66 binary body base64 decodes to exact bytes, rejects corrupt input; text stays raw', async () => {
+  for (const name of ['binary', 'image']) {
+    const response = await call(name, { body: 'aGVsbG8=' });
+    assert.equal(response.isError, undefined);
+    assert.deepEqual(seen.at(-1)!.body, Buffer.from('hello'));
+    assert.equal(seen.at(-1)!.headers['content-type'], name === 'binary' ? 'application/octet-stream' : 'image/png');
+  }
+  const count = seen.length;
+  for (const body of ['aGVs bG8=', 'aGVsbG8', '!!!!']) {
+    const response = await call('binary', { body });
+    assert.equal(response.isError, true);
+    assert.match(response.content[0].text, /base64/);
+  }
+  assert.equal(seen.length, count);
+  const text = await call('plain', { body: 'aGVsbG8=' });
+  assert.equal(text.isError, undefined);
+  assert.equal(seen.at(-1)!.body.toString('utf8'), 'aGVsbG8=');
+});
+
