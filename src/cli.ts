@@ -13,6 +13,7 @@ import { loadSpec } from './load.js';
 import { buildManifest } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
 import { watchSpec } from './watch.js';
+import type { ManifestOptions } from './manifest.js';
 
 const VERSION = '0.1.0';
 
@@ -34,6 +35,8 @@ Options:
       --poll-interval <seconds>        URL polling period with --watch (default: 30)
       --transport <stdio|http>         Transport (serve; default: stdio)
       --port <number>                  HTTP port (serve; default: 3000, localhost only)
+      --include <selector>             Include operations (repeatable)
+      --exclude <selector>             Exclude operations (repeatable; wins over include)
   -h, --help                           Show this help
   -v, --version                        Show version
 
@@ -52,7 +55,7 @@ async function runtimeSource(): Promise<string> {
   return readFile(new URL('../runtime/server.mjs', import.meta.url), 'utf8');
 }
 
-async function cmdGenerate(spec: string, flags: { out?: string; name?: string; baseUrl?: string }): Promise<void> {
+async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }): Promise<void> {
   const doc = await loadSpec(spec);
   const forge = await init(doc);
   const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl });
@@ -71,7 +74,7 @@ async function cmdGenerate(spec: string, flags: { out?: string; name?: string; b
   }
 }
 
-async function cmdServe(spec: string, flags: { name?: string; baseUrl?: string; transport?: string; port?: string }): Promise<void> {
+async function cmdServe(spec: string, flags: ManifestOptions & { name?: string; transport?: string; port?: string }): Promise<void> {
   const doc = await loadSpec(spec);
   await init(doc);
   const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl });
@@ -112,6 +115,8 @@ async function main(): Promise<void> {
       'poll-interval': { type: 'string' },
       transport: { type: 'string' },
       port: { type: 'string' },
+      include: { type: 'string', multiple: true },
+      exclude: { type: 'string', multiple: true },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
     },
@@ -126,7 +131,7 @@ async function main(): Promise<void> {
   }
   const spec = positionals[0];
   if (!spec) fail(`missing <spec> argument\n\n${HELP}`);
-  const flags = { out: values.out, name: values.name, baseUrl: values['base-url'], transport: values.transport, port: values.port };
+  const flags = { out: values.out, name: values.name, baseUrl: values['base-url'], transport: values.transport, port: values.port, include: values.include, exclude: values.exclude };
   if (flags.transport && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
   if (command !== 'serve' && (flags.transport || flags.port)) fail('--transport and --port are only valid with serve');
   if (flags.port && (flags.transport !== 'http' || !/^(0|[1-9][0-9]*)$/.test(flags.port) || Number(flags.port) > 65535)) {

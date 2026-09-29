@@ -14,6 +14,7 @@ import {
 } from '../vendor/forge/index.js';
 import { toToolName, dedupeNames, toEnvPrefix } from './naming.js';
 import { buildAuthPlan, type AuthPlan } from './auth.js';
+import { operationIncluded, operationTags, type OperationFilters } from './filter.js';
 
 export type ToolArg = {
   /** Tool argument name (dotted for nested body fields, e.g. "origin.host"). */
@@ -29,6 +30,7 @@ export type ToolDef = {
   name: string;
   description: string;
   operationId: string;
+  tags: string[];
   method: string;
   path: string;
   /** Preferred request content type, when the operation has a body. */
@@ -63,7 +65,7 @@ export type Manifest = {
   tools: ToolDef[];
 };
 
-export type ManifestOptions = {
+export type ManifestOptions = OperationFilters & {
   serverName?: string;
   baseUrl?: string;
 };
@@ -173,10 +175,12 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
   const baseUrl = opts.baseUrl ?? firstServer;
 
   const operationIds = getAllOperationIds();
-  const toolNames = dedupeNames(operationIds.map(toToolName));
+  const tagsById = operationTags(doc);
+  const selectedIds = operationIds.filter((id) => operationIncluded(id, tagsById.get(id) ?? [], opts));
+  const toolNames = dedupeNames(selectedIds.map(toToolName));
   const tools: ToolDef[] = [];
 
-  operationIds.forEach((operationId, i) => {
+  selectedIds.forEach((operationId, i) => {
     const op = resolveOperation(operationId);
     const toolName = toolNames[i];
     if (!op || !toolName) return;
@@ -235,6 +239,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       name: toolName,
       description,
       operationId,
+      tags: tagsById.get(operationId) ?? [],
       method: op.method.toUpperCase(),
       path: op.path,
       args,
