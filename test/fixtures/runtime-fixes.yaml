@@ -1,0 +1,103 @@
+openapi: 3.0.3
+info:
+  title: Runtime Fixes API
+  version: 1.0.0
+servers:
+  - url: http://placeholder.invalid
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: query
+      name: api_key
+security:
+  - api_key: []
+paths:
+  /rename:
+    post:
+      operationId: renamePet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200': { description: ok }
+  /items:
+    post:
+      operationId: replaceItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { type: string }
+      responses:
+        '200': { description: ok }
+  /weird:
+    post:
+      operationId: weirdFields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                __proto__: { type: string }
+                plain: { type: string }
+      responses:
+        '200': { description: ok }
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200': { description: ok }
+  /big:
+    get:
+      operationId: getBig
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: string }
+  /abort:
+    get:
+      operationId: getAbort
+      responses:
+        '200': { description: ok }
+  /secure:
+    get:
+      operationId: getSecure
+      parameters:
+        - name: api_key
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200': { description: ok }
