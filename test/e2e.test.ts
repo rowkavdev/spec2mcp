@@ -57,13 +57,16 @@ before(async () => {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
   const doc = await loadSpec(PETSTORE);
+  doc.paths['/pets']!.get!.security = [];
+  doc.paths['/pets']!.post!.security = [{ apiKeyQuery: [] }];
+  doc.paths['/uploads']!.post!.security = [{ bearerAuth: [], apiKeyQuery: [] }];
   await init(doc);
   const manifest = buildManifest(doc, { baseUrl: apiBase });
   await writeFile(join(OUT, 'operations.json'), JSON.stringify(manifest, null, 2));
   await copyFile(RUNTIME, join(OUT, 'server.mjs'));
 
   child = spawn(process.execPath, [join(OUT, 'server.mjs')], {
-    env: { ...process.env, PET_STORE_BEARER_AUTH: 'test-token-123' },
+    env: { ...process.env, PET_STORE_BEARER_AUTH: 'test-token-123', PET_STORE_API_KEY_QUERY: 'query-token-456' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   child.stdout!.on('data', (chunk) => {
@@ -124,6 +127,7 @@ test('tools/call maps query params including arrays', async () => {
   await rpc('tools/call', { name: 'list_pets', arguments: { limit: 5, tags: ['cat', 'dog'] } });
   assert.equal(seen.length, 1);
   assert.equal(seen[0]!.url, '/v1/pets?limit=5&tags=cat&tags=dog');
+  assert.equal(seen[0]!.headers.authorization, undefined, 'explicit anonymous operation sends no root auth');
 });
 
 test('tools/call reconstructs nested JSON bodies', async () => {
@@ -134,8 +138,17 @@ test('tools/call reconstructs nested JSON bodies', async () => {
   });
   assert.equal(seen.length, 1);
   assert.equal(seen[0]!.method, 'POST');
+  assert.equal(seen[0]!.url, '/v1/pets?api_key=query-token-456');
+  assert.equal(seen[0]!.headers.authorization, undefined, 'operation override excludes root bearer');
   assert.match(seen[0]!.headers['content-type'] as string, /application\/json/);
   assert.deepEqual(JSON.parse(seen[0]!.body), { name: 'Rex', address: { street: '1 Main St', city: 'London' } });
+});
+
+test('tools/call combines AND security schemes for one operation', async () => {
+  seen.length = 0;
+  await rpc('tools/call', { name: 'upload_file', arguments: { body: 'test' } });
+  assert.equal(seen[0]!.url, '/v1/uploads?api_key=query-token-456');
+  assert.equal(seen[0]!.headers.authorization, 'Bearer test-token-123');
 });
 
 test('missing required arg returns a tool error without calling the API', async () => {

@@ -73,6 +73,8 @@ Auth comes from the spec's `securitySchemes`; the server reads secrets from envi
 | apiKey (header or query) | `$ENV_VAR` sent as the named header/query param |
 | OAuth2 / OIDC | treat the env var as a pre-minted bearer token |
 
+Each tool uses its operation-level `security` when present, otherwise the root requirement. An explicit `security: []` sends no credentials. The first fully mapped OR alternative is selected when available (its schemes are combined as AND); a missing or unsupported scheme produces a generation-time warning and uses the sole supported scheme as a fallback if one exists, otherwise continues without that scheme.
+
 Env var names are derived from the API title and scheme name, e.g. `PET_STORE_BEARER_AUTH`. The generated `.env.example` lists them all. `<PREFIX>_BASE_URL` overrides the spec's server URL, so one generated server can point at staging or prod without regenerating.
 
 ## vs Cloudflare Code Mode
@@ -91,7 +93,6 @@ Verified against two of the biggest public specs (run `node examples/live-github
 Honest list, all roadmap items:
 
 - stdio transport only (no streamable HTTP yet)
-- The first root-level `security` requirement applies to all tools; per-operation security overrides are not read yet
 - Nested-body `required` flags are approximated when an intermediate object is optional
 - Non-JSON request bodies (multipart, octet-stream) pass through as a raw `body` string argument
 - Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
@@ -100,7 +101,7 @@ Honest list, all roadmap items:
 ## Roadmap
 
 - Streamable HTTP transport for the generated server
-- Per-operation security and multiple auth requirements
+- Support configurable choices between multiple security OR alternatives
 - Overlay support (rename/curate tools via Forge's JSONPath overlays)
 - Upstream the transformer to [cloudflare/forge](https://github.com/cloudflare/forge) as their MCP target
 - Publish to npm (the badges above go live with the first release)
