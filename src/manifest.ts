@@ -198,16 +198,22 @@ function mergedProperties(schema: Record<string, unknown> | undefined, seen = ne
  * path, merging allOf branches like Forge's flattening does (#87). Shapes
  * the walk cannot resolve (e.g. oneOf-derived args) keep the adapted view.
  */
-function bodyPropertyNullable(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath: string[]): boolean {
+/** Resolve the requestBody schema node at a body field path, merging allOf
+ * branches at every level like Forge's flattening does (#87). */
+function bodySchemaAtPath(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath: string[]): Record<string, unknown> | undefined {
   const requestBody = resolveDocRef(
     doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody,
   ) as OpenAPIV3.RequestBodyObject | undefined;
   let schema = resolveDocRef(requestBody?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
   for (const segment of fieldPath) {
-    if (!schema || typeof schema !== 'object') return false;
+    if (!schema || typeof schema !== 'object') return undefined;
     schema = resolveDocRef(mergedProperties(schema)[segment]) as Record<string, unknown> | undefined;
   }
-  return schema?.nullable === true;
+  return schema;
+}
+
+function bodyPropertyNullable(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath: string[]): boolean {
+  return bodySchemaAtPath(doc, op, fieldPath)?.nullable === true;
 }
 
 function disambiguateArgNames(args: ToolArg[]): void {
@@ -577,6 +583,36 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
           ? { anyOf: [argSchema(p), { type: 'null' }] }
           : argSchema(p);
         args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema });
+      }
+      // A nullable object parent flattens to leaves in Forge's view, so
+      // null for the parent is unsendable and {"pet": null} silently goes
+      // out as an empty body (#120). Retain a parent arg accepting
+      // object|null alongside the leaf args. Parent args come after the
+      // leaves, so on the wire a provided parent replaces its subtree; a
+      // provided leaf with an absent parent still builds the object.
+      // Nested parents stay optional: required-ness within an optional
+      // parent is the same approximation the leaves document.
+      const seenParents = new Set<string>();
+      for (const p of op.bodyParams) {
+        for (let depth = 1; depth < p.apiFieldPath.length; depth++) {
+          const prefix = p.apiFieldPath.slice(0, depth);
+          const key = prefix.join('.');
+          if (seenParents.has(key)) continue;
+          seenParents.add(key);
+          const node = bodySchemaAtPath(doc, op, prefix);
+          if (!node || node.nullable !== true) continue;
+          if (node.type !== 'object' && !node.properties && !Array.isArray(node.allOf)) continue;
+          args.push({
+            name: key,
+            location: 'body',
+            apiFieldPath: prefix,
+            required: depth === 1 ? bodyRequired && rootRequired.has(prefix[0] ?? '') : false,
+            schema: {
+              anyOf: [{ type: 'object' }, { type: 'null' }],
+              ...(typeof node.description === 'string' ? { description: node.description } : {}),
+            },
+          });
+        }
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
       for (const field of op.multipart.fields) {
