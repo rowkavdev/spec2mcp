@@ -7,7 +7,7 @@
 [![npm downloads/month](https://img.shields.io/npm/dm/spec2mcp)](https://www.npmjs.com/package/spec2mcp)
 [![yearly downloads](https://img.shields.io/npm/dy/spec2mcp)](https://www.npmjs.com/package/spec2mcp)
 
-spec2mcp turns any OpenAPI 3.x spec into a working MCP server with one command. Every operation in the spec becomes a tool that Claude, Cursor, or any other MCP client can call, with argument schemas, required-field checks, and auth pulled from the spec itself.
+spec2mcp turns any OpenAPI 3.x or Swagger 2.0 spec into a working MCP server with one command. Every operation in the spec becomes a tool that Claude, Cursor, or any other MCP client can call, with argument schemas, required-field checks, and auth pulled from the spec itself.
 
 It is built as a transformer for [Forge](https://github.com/cloudflare/forge), the generation pipeline Cloudflare open-sourced for their `cf` CLI: the spec goes through Forge's resolver and plugin lifecycle, and spec2mcp's transformer emits the server.
 
@@ -167,6 +167,10 @@ CI also runs a compat matrix over pinned snapshots of four large public APIs, ve
 - **`webhooks`** - a webhook is an event the API sends to *your* server, so webhooks are never tools. They are recorded in `operations.json` and listed in the generated README instead of being silently dropped.
 - **`jsonSchemaDialect`** - recorded in `operations.json`; a non-default dialect is flagged in the generated README and CLI output, since tool argument schemas are approximated as standard JSON Schema.
 
+## Swagger 2.0
+
+Specs still on Swagger/OpenAPI 2.0 (Slack's web API, Kubernetes' aggregated `swagger.json`, and many older enterprise APIs) are converted to 3.x in memory at load, then run through the same pipeline: `host`/`basePath`/`schemes` become the server URL, `securityDefinitions` become security schemes (basic auth converts to HTTP basic), and operations without `operationId` get synthesised tool names. Conversion uses [swagger2openapi](https://github.com/Mermade/oas-kit) at generation time only - generated projects keep their single runtime dependency. Kubernetes' full aggregated 2.0 spec (1,190 operations) is covered by a pinned test.
+
 ## Current limitations
 
 Honest list, all roadmap items:
@@ -177,6 +181,7 @@ Honest list, all roadmap items:
 - Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
 - `head`/`options`/`trace` operations are not exposed (Forge limitation)
 - Overlay actions support `target` + `update`/`remove` only (the curation subset of the Overlay spec)
+- Swagger 2.0 inputs with external `$ref`s relative to the spec's own location are unsupported (the converted document exists only in memory)
 
 ## Roadmap
 
