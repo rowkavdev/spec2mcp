@@ -61,6 +61,7 @@ before(async () => {
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
+      { ...tool('getFile', 'GET', [{ name: 'name', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{name}/data' },
       tool('vendorJsonString', 'POST', [bodyArg()], 'application/vnd.test+json'),
     ],
   };
@@ -158,4 +159,19 @@ test('#77 malformed header arguments yield tool errors, not protocol exceptions'
   const ok = await call('headerValue', { xTrace: 'valid' });
   assert.equal(ok.isError, undefined);
   assert.equal(seen.at(-1)!.headers['x-trace'], 'valid');
+});
+
+test('#78 bare dot-segment path values cannot redirect the request', async () => {
+  const count = seen.length;
+  for (const name of ['.', '..']) {
+    const response = await call('getFile', { name });
+    assert.equal(response.isError, true);
+    assert.match(response.content[0].text, /Invalid path argument.*dot segments/);
+  }
+  assert.equal(seen.length, count, 'no dot-segment request reached upstream');
+  for (const name of ['%2e%2e', 'a/../b']) {
+    const result = await call('getFile', { name });
+    assert.equal(result.isError, undefined);
+    assert.equal(seen.at(-1)!.url.split('?')[0], `/api/files/${encodeURIComponent(name)}/data`);
+  }
 });
