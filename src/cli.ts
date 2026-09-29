@@ -2,7 +2,7 @@
  * spec2mcp - turn any OpenAPI spec into a working MCP server.
  *
  *   spec2mcp generate <spec> --out ./my-api-mcp   Emit a ready-to-run project
- *   spec2mcp serve <spec>                         Run an MCP server on stdio directly
+ *   spec2mcp serve <spec>                         Run an MCP server directly
  *
  * <spec> is a local file path or an http(s) URL, JSON or YAML.
  */
@@ -20,7 +20,7 @@ const HELP = `spec2mcp ${VERSION} - turn any OpenAPI spec into a working MCP ser
 
 Usage:
   spec2mcp generate <spec> [options]   Generate a ready-to-run MCP server project
-  spec2mcp serve <spec> [options]      Run an MCP server on stdio directly from the spec
+  spec2mcp serve <spec> [options]      Run an MCP server directly from the spec
   spec2mcp <spec> [options]            Shorthand for "generate"
 
 Arguments:
@@ -32,12 +32,14 @@ Options:
       --base-url <url>                 Override the API base URL from the spec's servers list
       --watch                          Regenerate when the spec changes (generate only)
       --poll-interval <seconds>        URL polling period with --watch (default: 30)
+      --transport <stdio|http>         Transport (serve; default: stdio)
+      --port <number>                  HTTP port (serve; default: 3000, localhost only)
   -h, --help                           Show this help
   -v, --version                        Show version
 
 Examples:
   spec2mcp generate openapi.json --out ./petstore-mcp
-  spec2mcp serve https://api.example.com/openapi.yaml
+  spec2mcp serve https://api.example.com/openapi.yaml --transport http --port 3000
 `;
 
 function fail(message: string): never {
@@ -69,14 +71,18 @@ async function cmdGenerate(spec: string, flags: { out?: string; name?: string; b
   }
 }
 
-async function cmdServe(spec: string, flags: { name?: string; baseUrl?: string }): Promise<void> {
+async function cmdServe(spec: string, flags: { name?: string; baseUrl?: string; transport?: string; port?: string }): Promise<void> {
   const doc = await loadSpec(spec);
   await init(doc);
   const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl });
   for (const warning of manifest.auth.warnings) console.error(`warning: ${warning}`);
   const runtimeUrl = new URL('../runtime/server.mjs', import.meta.url).href;
-  const { runServer } = (await import(runtimeUrl)) as { runServer: (manifest: import('./manifest.js').Manifest) => Promise<void> };
-  await runServer(manifest);
+  const runtime = (await import(runtimeUrl)) as {
+    runServer: (manifest: import('./manifest.js').Manifest) => Promise<void>;
+    runHttpServer: (manifest: import('./manifest.js').Manifest, options: { port: number }) => Promise<unknown>;
+  };
+  if (flags.transport === 'http') await runtime.runHttpServer(manifest, { port: flags.port === undefined ? 3000 : Number(flags.port) });
+  else await runtime.runServer(manifest);
 }
 
 async function main(): Promise<void> {
@@ -104,6 +110,8 @@ async function main(): Promise<void> {
       'base-url': { type: 'string' },
       watch: { type: 'boolean' },
       'poll-interval': { type: 'string' },
+      transport: { type: 'string' },
+      port: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
     },
@@ -118,7 +126,12 @@ async function main(): Promise<void> {
   }
   const spec = positionals[0];
   if (!spec) fail(`missing <spec> argument\n\n${HELP}`);
-  const flags = { out: values.out, name: values.name, baseUrl: values['base-url'] };
+  const flags = { out: values.out, name: values.name, baseUrl: values['base-url'], transport: values.transport, port: values.port };
+  if (flags.transport && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
+  if (command !== 'serve' && (flags.transport || flags.port)) fail('--transport and --port are only valid with serve');
+  if (flags.port && (flags.transport !== 'http' || !/^(0|[1-9][0-9]*)$/.test(flags.port) || Number(flags.port) > 65535)) {
+    fail('--port requires --transport http and an integer between 0 and 65535');
+  }
 
   if (values['poll-interval'] && (!values.watch || !/^https?:\/\//i.test(spec))) {
     fail('--poll-interval requires --watch and an HTTP(S) spec URL');
