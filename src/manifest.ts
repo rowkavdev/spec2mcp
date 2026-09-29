@@ -290,7 +290,9 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
       try {
         return dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
       } catch (error) {
-        if (error instanceof SchemaTooLarge) return undefined;
+        // Over-budget: skip this status and keep the ranked loop alive -
+        // a later 2xx may carry a schema that fits the budget.
+        if (error instanceof SchemaTooLarge) continue;
         throw error;
       }
     }
