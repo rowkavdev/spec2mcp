@@ -6,6 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import type { OpenAPIV3 } from 'openapi-types';
+import { basename } from 'node:path';
+import type { ApiOverlay, ApiOverlayFile } from '../vendor/forge/index.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 
@@ -92,6 +94,30 @@ function collapseTypeArrays(node: unknown): void {
     if (key === 'example' || key === 'examples') continue;
     collapseTypeArrays(value);
   }
+}
+
+/**
+ * Load OpenAPI Overlay documents (Overlay Specification v1.0.0), JSON or YAML.
+ * Overlays rename, describe or remove operations before generation;
+ * src/overlay.ts applies them and fails loudly on unmatched targets.
+ */
+export async function loadOverlays(paths: string[]): Promise<ApiOverlayFile[]> {
+  const files: ApiOverlayFile[] = [];
+  for (const path of paths) {
+    const text = await readFile(path, 'utf8');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = parseYaml(text);
+    }
+    const overlay = parsed as ApiOverlay;
+    if (!overlay || typeof overlay !== 'object' || typeof overlay.overlay !== 'string' || !Array.isArray(overlay.actions)) {
+      throw new Error(`${path} is not an OpenAPI Overlay document (expected an "overlay" version and an "actions" array).`);
+    }
+    files.push({ name: basename(path), overlay });
+  }
+  return files;
 }
 
 /**

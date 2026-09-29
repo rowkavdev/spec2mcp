@@ -1,0 +1,13 @@
+overlay: 1.0.0
+info:
+  title: Curate the petstore tools
+  version: 1.0.0
+actions:
+  - target: $.paths.*[?(@.operationId=='getPet')]
+    update:
+      operationId: fetchPet
+  - target: $.paths.*[?(@.operationId=='deletePet')]
+    remove: true
+  - target: $.paths.*[?(@.operationId=='listPets')]
+    update:
+      description: List every pet currently in the store.

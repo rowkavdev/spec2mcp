@@ -99,6 +99,32 @@ For reusable settings, put `spec2mcp.config.json` in the current directory (or p
 
 CLI flags override the corresponding config keys; repeat each flag to supply multiple selectors. Generation writes the effective settings to the generated project's `spec2mcp.config.json`. Its server reads that file at startup and can narrow its generated tools or override name and base URL without rebuilding. To expose additional operations, regenerate from the original spec. Environment `<PREFIX>_BASE_URL` still overrides the configured base URL at call time. `serve` reads the working directory's config too.
 
+## Curate tools with overlays
+
+Rename, re-describe or remove operations before generation with [OpenAPI Overlays](https://spec.openapis.org/overlay/latest.html) (v1.0.0). Pass `--overlay` per file, repeatable, applied in order after any earlier files:
+
+```bash
+spec2mcp generate openapi.yaml --overlay curate.yaml --out ./my-mcp
+```
+
+```yaml
+overlay: 1.0.0
+info:
+  title: Curate the tools
+  version: 1.0.0
+actions:
+  - target: $.paths.*[?(@.operationId=='getPet')]
+    update:
+      operationId: fetchPet          # renames the tool to fetch_pet
+  - target: $.paths.*[?(@.operationId=='deletePet')]
+    remove: true                      # no tool is generated for it
+  - target: $.paths.*[?(@.operationId=='listPets')]
+    update:
+      description: List every pet currently in the store.
+```
+
+Each action's `target` is a JSONPath evaluated against the spec; `update` deep-merges into every matched node and `remove: true` deletes it. A target that matches nothing fails the run, so a stale operationId in your overlay is caught instead of silently ignored. Overlays apply before tool-name derivation and filtering, so renamed operations flow into tool names and `--include` selectors see the overlaid ids. Forge-specific `x-forge-commands` overlay keys are ignored - they belong to Forge's cf CLI pipeline, not MCP generation.
+
 ## Auth
 
 Auth comes from the spec's `securitySchemes`; the server reads secrets from environment variables at call time. Nothing secret is ever written into generated files.
@@ -150,11 +176,11 @@ Honest list, all roadmap items:
 - Raw `application/octet-stream` request bodies pass through as a raw `body` string argument (multipart uploads are handled per field)
 - Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
 - `head`/`options`/`trace` operations are not exposed (Forge limitation)
+- Overlay actions support `target` + `update`/`remove` only (the curation subset of the Overlay spec)
 
 ## Roadmap
 
 - Support configurable choices between multiple security OR alternatives
-- Overlay support (rename/curate tools via Forge's JSONPath overlays)
 - Upstream the transformer to [cloudflare/forge](https://github.com/cloudflare/forge) as their MCP target
 - Publish to npm (the badges above go live with the first release)
 
