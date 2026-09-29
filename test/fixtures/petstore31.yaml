@@ -1,0 +1,74 @@
+# Hand-written OpenAPI 3.1 fixture exercising the 3.1-specific features
+# spec2mcp handles: type unions, a custom jsonSchemaDialect, and webhooks.
+openapi: 3.1.0
+info:
+  title: Pet Store 3.1
+  version: 2.0.0
+jsonSchemaDialect: https://dialects.example.com/pets-2020-12
+servers:
+  - url: https://api.pets31.test/v1
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      description: Fetch one pet.
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            # 3.1 type union: collapses to integer.
+            type: ["integer", "null"]
+        - name: verbose
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: include
+          in: query
+          description: Extra data to include.
+          schema:
+            # Multi-type union: becomes anyOf branches.
+            type: [string, integer]
+      responses:
+        '200':
+          description: OK
+  /pets:
+    post:
+      operationId: createPet
+      description: Add a pet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                nickname:
+                  type: ["string", "null"]
+                microchipId:
+                  type: ["integer", "null"]
+                  description: Optional chip id.
+      responses:
+        '201':
+          description: Created
+webhooks:
+  petAdopted:
+    post:
+      operationId: petAdopted
+      summary: A pet was adopted
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                petId:
+                  type: integer
+      responses:
+        '202':
+          description: Accepted
+components:
+  schemas: {}
