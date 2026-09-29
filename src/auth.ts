@@ -75,20 +75,26 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
   // Two scheme names can normalize to the same env var ("api-key" and
   // "api_key" both become API_KEY): one shared variable sends the same
   // secret to both headers with no way to configure them independently
-  // (#101). Suffix colliding variables deterministically (byte order by
-  // scheme name) so the generated instructions and the runtime agree.
-  const byEnvVar = new Map<string, string[]>();
-  for (const [name, scheme] of mapped) {
-    const list = byEnvVar.get(scheme.envVar) ?? [];
-    list.push(name);
-    byEnvVar.set(scheme.envVar, list);
-  }
-  for (const names of byEnvVar.values()) {
-    if (names.length < 2) continue;
-    names.sort();
-    names.forEach((name, index) => {
-      if (index > 0) mapped.get(name)!.envVar = `${mapped.get(name)!.envVar}_${index + 1}`;
-    });
+  // (#101). Allocate deterministically in byte order by scheme name: the
+  // first claimant keeps the base name, later ones advance a numeric
+  // suffix until the name is free (#106). "Free" means neither already
+  // allocated nor another scheme's base name - "api_key_2" normalizes to
+  // API_KEY_2, so a suffix landing there would collide again - and the
+  // base URL variable is reserved up front.
+  const baseNames = new Set([...mapped.values()].map((scheme) => scheme.envVar));
+  const allocated = new Set<string>([`${envPrefix}_BASE_URL`]);
+  for (const name of [...mapped.keys()].sort()) {
+    const scheme = mapped.get(name)!;
+    let candidate = scheme.envVar;
+    if (allocated.has(candidate)) {
+      let n = 2;
+      candidate = `${scheme.envVar}_${n}`;
+      while (allocated.has(candidate) || (baseNames.has(candidate) && candidate !== scheme.envVar)) {
+        candidate = `${scheme.envVar}_${++n}`;
+      }
+    }
+    scheme.envVar = candidate;
+    allocated.add(candidate);
   }
   const auth: AuthPlan = { schemes: [], warnings: [], baseUrlEnvVar: `${envPrefix}_BASE_URL` };
   const used = new Set<string>();

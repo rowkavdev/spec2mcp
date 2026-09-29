@@ -82,3 +82,37 @@ test('#101 colliding apiKey env names get deterministic suffixes', async () => {
   const tool = m.tools.find((t) => t.name === 'list_things');
   assert.deepEqual(tool?.authSchemeNames?.sort(), ['api-key', 'api_key']);
 });
+
+test('#106 suffix allocation never lands on another base name', async () => {
+  const doc = {
+    openapi: '3.0.3',
+    info: { title: 'R API', version: '1.0.0' },
+    servers: [{ url: 'https://r.example.com' }],
+    components: {
+      schemas: {},
+      securitySchemes: {
+        // api-key/api_key collide on API_KEY; api_key_2's own base IS the
+        // name the naive suffix would hand out.
+        'api-key': { type: 'apiKey', in: 'header', name: 'Api-Key' },
+        'api_key': { type: 'apiKey', in: 'header', name: 'X-Api-Key' },
+        'api_key_2': { type: 'apiKey', in: 'header', name: 'X-Secondary-Key' },
+        // A scheme normalizing onto the reserved base URL variable.
+        'base_url': { type: 'http', scheme: 'bearer' },
+      },
+    },
+    security: [{ 'api-key': [], 'api_key': [], 'api_key_2': [], 'base_url': [] }],
+    paths: { '/things': { get: { operationId: 'listThings', responses: { '200': { description: 'ok' } } } } },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = buildManifest(doc as any);
+  const byScheme = new Map(m.auth.schemes.map((s) => [s.schemeName, s.envVar]));
+  const envVars = [...byScheme.values()];
+  assert.equal(new Set(envVars).size, envVars.length, `duplicate env var emitted: ${envVars.join(', ')}`);
+  assert.equal(byScheme.get('api-key'), 'R_API_KEY', 'byte-order first keeps the base name');
+  assert.equal(byScheme.get('api_key'), 'R_API_KEY_3', 'suffix skips the taken base name API_KEY_2');
+  assert.equal(byScheme.get('api_key_2'), 'R_API_KEY_2', 'own base name stays put');
+  assert.equal(byScheme.get('base_url'), 'R_API_BASE_URL_2', 'base URL variable is reserved');
+  assert.equal(m.auth.baseUrlEnvVar, 'R_API_BASE_URL');
+});
