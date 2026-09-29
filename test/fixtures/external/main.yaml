@@ -1,0 +1,15 @@
+openapi: 3.0.3
+info:
+  title: External Refs
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './nested/schemas.yaml#/WidgetList'

@@ -1,0 +1,4 @@
+WidgetList:
+  type: array
+  items:
+    type: string
