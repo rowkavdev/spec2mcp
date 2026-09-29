@@ -1,10 +1,12 @@
 /**
- * Spec loading: file path or URL, JSON or YAML, external $ref bundling,
- * and operationId repair so every operation reaches the Forge pipeline.
+ * Spec loading: file path or URL, JSON or YAML, Swagger 2.0 conversion,
+ * external $ref bundling, and operationId repair so every operation
+ * reaches the Forge pipeline.
  */
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
+import { convert as convertSwagger2 } from 'swagger2openapi';
 import type { OpenAPIV3 } from 'openapi-types';
 import { basename } from 'node:path';
 import type { ApiOverlay, ApiOverlayFile } from '../vendor/forge/index.js';
@@ -27,16 +29,35 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   } catch {
     raw = parseYaml(text);
   }
-  if (typeof raw !== 'object' || raw === null || !('openapi' in raw)) {
-    throw new Error('Input does not look like an OpenAPI 3.x document (missing top-level "openapi").');
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('Input is not an OpenAPI or Swagger document (expected a JSON or YAML object).');
+  }
+
+  let convertedFromSwagger2 = false;
+  if (!('openapi' in raw)) {
+    if ((raw as Record<string, unknown>).swagger === '2.0') {
+      // Swagger 2.0: convert in memory, then run the same pipeline. Servers
+      // come from host/basePath/schemes and securityDefinitions become
+      // components.securitySchemes, so auth and base URL handling are
+      // unchanged.
+      const { openapi } = await convertSwagger2(raw as never, { patch: true, warnOnly: true } as never);
+      raw = openapi;
+      convertedFromSwagger2 = true;
+    } else {
+      throw new Error('Input does not look like an OpenAPI 3.x or Swagger 2.0 document (missing top-level "openapi"/"swagger").');
+    }
   }
 
   // Bundle external $refs (files/URLs) into one document. Internal refs are
   // left as refs - Forge's resolver handles those. Bundle from the original
   // path/URL (not the parsed object) so relative external refs like
   // "../policies.yaml" resolve against the spec's own location. For URLs this
-  // fetches the document a second time - acceptable for a generator.
-  const doc = (await $RefParser.bundle(input as never, {
+  // fetches the document a second time - acceptable for a generator. A
+  // converted Swagger 2.0 document only exists in memory, so it bundles from
+  // the object instead; refs relative to the spec's own location are
+  // unsupported for 2.0 inputs (none of the major 2.0 publishers - Slack,
+  // Kubernetes - use them).
+  const doc = (await $RefParser.bundle((convertedFromSwagger2 ? raw : input) as never, {
     dereference: { circular: 'ignore' },
   })) as unknown as OpenAPIV3.Document;
 
