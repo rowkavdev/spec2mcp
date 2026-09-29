@@ -38,15 +38,60 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
     dereference: { circular: 'ignore' },
   })) as unknown as OpenAPIV3.Document;
 
-  // Forge's operation indexer requires components.schemas to exist; minimal
-  // real-world specs often omit components entirely.
+  // Forge's operation indexer requires paths and components.schemas to exist;
+  // real-world specs often omit components, and a webhook-only 3.1 spec may
+  // omit paths entirely.
   const anyDoc = doc as unknown as Record<string, unknown>;
+  if (typeof anyDoc.paths !== 'object' || anyDoc.paths === null) anyDoc.paths = {};
   if (typeof anyDoc.components !== 'object' || anyDoc.components === null) anyDoc.components = {};
   const components = anyDoc.components as Record<string, unknown>;
   if (typeof components.schemas !== 'object' || components.schemas === null) components.schemas = {};
 
+  // OpenAPI 3.1 upgrades schemas to JSON Schema 2020-12, where `type` may be
+  // a union array. Forge reads `type` as a single string, so collapse unions
+  // before the document reaches the resolver.
+  if (typeof doc.openapi === 'string' && doc.openapi.startsWith('3.1')) {
+    collapseTypeArrays(doc);
+  }
+
   ensureOperationIds(doc);
   return doc;
+}
+
+const JSON_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
+
+function isJsonSchemaTypeArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((t) => typeof t === 'string' && JSON_SCHEMA_TYPES.has(t));
+}
+
+/**
+ * Collapse JSON Schema 2020-12 type unions so Forge can type the schema:
+ * `["string", "null"]` becomes `type: "string"` (a nullable parameter simply
+ * is not required), and a union of several non-null types becomes an `anyOf`
+ * of single-type branches, which the resolver already understands.
+ * `example`/`examples` subtrees hold payload data, not schemas - a property
+ * named "type" there is user data and is left alone.
+ */
+function collapseTypeArrays(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collapseTypeArrays(item);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  const rec = node as Record<string, unknown>;
+  if (isJsonSchemaTypeArray(rec.type)) {
+    const nonNull = rec.type.filter((t) => t !== 'null');
+    if (nonNull.length === 1) {
+      rec.type = nonNull[0];
+    } else if (nonNull.length > 1) {
+      rec.anyOf = nonNull.map((t) => ({ type: t }));
+      delete rec.type;
+    }
+  }
+  for (const [key, value] of Object.entries(rec)) {
+    if (key === 'example' || key === 'examples') continue;
+    collapseTypeArrays(value);
+  }
 }
 
 /**
