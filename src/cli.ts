@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { init } from '../vendor/forge/index.js';
 import { loadSpec } from './load.js';
-import { buildManifest } from './manifest.js';
+import { buildManifest, DEFAULT_31_DIALECT } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
 import { watchSpec } from './watch.js';
 import type { ManifestOptions } from './manifest.js';
@@ -73,6 +73,12 @@ async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string
   }
   if (!probe.baseUrl) {
     console.log(`Note: the spec declares no server URL - set ${probe.auth.baseUrlEnvVar} or regenerate with --base-url.`);
+  }
+  if (probe.webhooks.length > 0) {
+    console.log(`Note: the spec declares ${probe.webhooks.length} webhook${probe.webhooks.length === 1 ? '' : 's'} - listed in the generated README, not exposed as tools.`);
+  }
+  if (probe.jsonSchemaDialect && probe.jsonSchemaDialect !== DEFAULT_31_DIALECT) {
+    console.log(`Note: the spec declares a custom JSON Schema dialect (${probe.jsonSchemaDialect}); tool argument schemas are approximated as standard JSON Schema.`);
   }
 }
 
