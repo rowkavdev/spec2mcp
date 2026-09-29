@@ -101,9 +101,15 @@ function pickContentType(contentTypes: string[]): string | undefined {
  * of recursing forever. OpenAPI-only annotations that mean nothing to a JSON
  * Schema validator are dropped; `nullable: true` becomes a type union.
  */
-function dereferenceSchema(node: unknown, refChain: Set<string>): unknown {
-  if (Array.isArray(node)) return node.map((v) => dereferenceSchema(v, refChain));
+const MAX_SCHEMA_DEPTH = 12;
+/** Schemas larger than this stay text-only: outputSchema travels inside
+ * tools/list, and multi-MB listings break MCP stdio clients. */
+const MAX_OUTPUT_SCHEMA_BYTES = 4096;
+
+function dereferenceSchema(node: unknown, refChain: Set<string>, depth = 0): unknown {
+  if (Array.isArray(node)) return depth > MAX_SCHEMA_DEPTH ? [] : node.map((v) => dereferenceSchema(v, refChain, depth + 1));
   if (!node || typeof node !== 'object') return node;
+  if (depth > MAX_SCHEMA_DEPTH) return {};
 
   let target = node as Record<string, unknown>;
   const ref = typeof target.$ref === 'string' ? target.$ref : undefined;
@@ -244,14 +250,18 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
 
     const responseSchema = successJsonSchema(op);
     if (responseSchema) {
-      if (schemaIsObject(responseSchema)) {
-        tool.outputSchema = { type: 'object', ...responseSchema };
-      } else {
-        // MCP requires object-shaped structured content: wrap arrays and
-        // primitives under a single "result" property.
-        tool.outputSchema = { type: 'object', properties: { result: responseSchema }, required: ['result'] };
-        tool.outputWrap = true;
+      // type must be the literal "object" (MCP clients validate it): a
+      // nullable top level collapses to object rather than a type union.
+      const candidate = schemaIsObject(responseSchema)
+        ? { ...responseSchema, type: 'object' }
+        : // MCP requires object-shaped structured content: wrap arrays and
+          // primitives under a single "result" property.
+          { type: 'object', properties: { result: responseSchema }, required: ['result'] };
+      if (JSON.stringify(candidate).length <= MAX_OUTPUT_SCHEMA_BYTES) {
+        tool.outputSchema = candidate;
+        if (!schemaIsObject(responseSchema)) tool.outputWrap = true;
       }
+      // Over-budget schemas (huge generated component trees) stay text-only.
     }
     tools.push(tool);
   });
