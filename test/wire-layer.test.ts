@@ -112,3 +112,14 @@ test('#66 binary body base64 decodes to exact bytes, rejects corrupt input; text
   assert.equal(seen.at(-1)!.body.toString('utf8'), 'aGVsbG8=');
 });
 
+test('#67 omitted optional body has no body or Content-Type; explicit empty object survives', async () => {
+  const omitted = await call('optional');
+  assert.equal(omitted.isError, undefined);
+  assert.equal(seen.at(-1)!.body.length, 0);
+  assert.equal(seen.at(-1)!.headers['content-type'], undefined);
+  const explicit = await call('emptyObject', { body: {} });
+  assert.equal(explicit.isError, undefined);
+  assert.equal(seen.at(-1)!.body.toString('utf8'), '{}');
+  assert.equal(seen.at(-1)!.headers['content-type'], 'application/json');
+});
+
