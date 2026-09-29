@@ -44,6 +44,45 @@ test('#60 an over-budget first-ranked schema falls through to the next 2xx', asy
   await init(d);
   const m = buildManifest(d);
   const tool = m.tools.find((t) => t.name === 'make_thing');
-  const properties = tool?.outputSchema?.properties as Record<string, unknown> | undefined;
-  assert.ok(properties && 'id' in properties, 'the affordable 201 schema is used, not the over-budget 200 chain');
+  // #61 supersedes the ranked fallback here: the 200 shape is unknown
+  // (over budget), so shape equality across success statuses cannot be
+  // proven and nothing is advertised - a valid 200 must never be rejected
+  // against a schema it was not validated with.
+  assert.equal(tool?.outputSchema, undefined, 'unknown-shape status forces text-only');
+});
+
+test('#61 same shape across 200 and 201 is advertised', async () => {
+  const shape = { type: 'object', properties: { id: { type: 'string' } } };
+  const d = doc({
+    '/things': {
+      post: {
+        operationId: 'makeThing',
+        responses: {
+          '200': { description: 'ok', content: { 'application/json': { schema: shape } } },
+          '201': { description: 'created', content: { 'application/json': { schema: shape } } },
+          '204': { description: 'no body' },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  assert.equal(m.tools[0]?.outputSchema?.type, 'object', 'one shared shape, bodiless statuses skipped');
+});
+
+test('#61 differing success shapes advertise no outputSchema', async () => {
+  const d = doc({
+    '/things': {
+      post: {
+        operationId: 'makeThing',
+        responses: {
+          '200': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } } } },
+          '201': { description: 'created', content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string' } } } } } },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'a valid 201 must never be validated against the 200 shape');
 });
