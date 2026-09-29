@@ -266,11 +266,14 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
   return out;
 }
 
-/** Pick the JSON schema of the preferred 2xx response, if the spec declares one. */
+/** Prefer specific 2xx codes, then the 2XX range, then default. */
 function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefined {
   const codes = Object.keys(op.responses ?? {})
-    .filter((c) => /^2\d\d$/.test(c))
-    .sort();
+    .filter((c) => /^2\d\d$/.test(c) || /^2XX$/i.test(c) || c === 'default')
+    .sort((a, b) => {
+      const rank = (code: string) => /^2\d\d$/.test(code) ? 0 : /^2XX$/i.test(code) ? 1 : 2;
+      return rank(a) - rank(b) || a.localeCompare(b);
+    });
   for (const code of codes) {
     const content = op.responses[code]?.content ?? {};
     const mediaType = Object.keys(content).includes('application/json')
