@@ -72,6 +72,7 @@ before(async () => {
       tool('headerArray', 'GET', [{ name: 'X-Tags', location: 'header', style: 'simple', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
       { ...tool('pathArray', 'GET', [{ name: 'tags', location: 'path', style: 'simple', explode: false, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
       { ...tool('pathLabel', 'GET', [{ name: 'tags', location: 'path', style: 'label', explode: true, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
+      { ...tool('pathLabelObject', 'GET', [{ name: 'tags', location: 'path', style: 'label', explode: true, required: true, schema: { type: 'object' } }]), path: '/path/{tags}' },
       { ...tool('pathMatrix', 'GET', [{ name: 'tags', location: 'path', style: 'matrix', explode: true, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
       tool('xml', 'POST', [{ ...bodyArg(), schema: { type: 'string' } }], 'application/xml'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
@@ -270,4 +271,23 @@ test('#108 allowReserved leaves safe reserved characters but encodes delimiters'
   const key = await call('reservedKeyCollision', { api_key: 'evil/leak' });
   assert.equal(key.isError, undefined);
   assert.deepEqual(new URL(seen.at(-1)!.url, 'http://localhost').searchParams.getAll('api_key'), [credential]);
+});
+
+test('label-style empty path values cannot normalize to a different endpoint', async () => {
+  const count = seen.length;
+  for (const value of [[], ['']]) {
+    const result = await call('pathLabel', { tags: value });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /dot segments/);
+  }
+  const obj = await call('pathLabelObject', { tags: {} });
+  assert.equal(obj.isError, true);
+  assert.match(obj.content[0].text, /dot segments/);
+  assert.equal(seen.length, count, 'none of the dot-segment calls reached upstream');
+  const simple = await call('pathArray', { tags: ['cat', 'dog'] });
+  assert.equal(simple.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/path/cat,dog');
+  const multi = await call('pathLabel', { tags: ['cat', 'dog'] });
+  assert.equal(multi.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/path/.cat.dog');
 });
