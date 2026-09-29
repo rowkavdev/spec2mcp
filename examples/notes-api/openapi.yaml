@@ -1,0 +1,104 @@
+openapi: 3.0.3
+info:
+  title: Notes API
+  version: 1.0.0
+  description: A small notes service with bearer auth - shows how generated servers take credentials from environment variables.
+servers:
+  - url: https://api.notes.example/v1
+security:
+  - bearerAuth: []
+paths:
+  /notes:
+    get:
+      operationId: listNotes
+      summary: List notes
+      parameters:
+        - name: q
+          in: query
+          description: Full-text search over note titles and bodies
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The matching notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Note'
+    post:
+      operationId: createNote
+      summary: Create a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewNote'
+      responses:
+        '201':
+          description: The created note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+  /notes/{noteId}:
+    get:
+      operationId: getNote
+      summary: Get one note
+      parameters:
+        - name: noteId
+          in: path
+          required: true
+          description: ID of the note
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '404':
+          description: No note with that ID
+    delete:
+      operationId: deleteNote
+      summary: Delete a note
+      parameters:
+        - name: noteId
+          in: path
+          required: true
+          description: ID of the note
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Note deleted
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Note:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+    NewNote:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: The note's title
+        body:
+          type: string
+          description: The note's contents
