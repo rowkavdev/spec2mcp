@@ -102,7 +102,7 @@ function filePart(arg, value) {
   if (bytes.length === 0 || bytes.toString('base64') !== contentBase64) {
     throw new ToolArgumentError(`Argument "${arg.name}": contentBase64 does not round-trip; refusing to upload corrupt data.`);
   }
-  const filename = typeof value.filename === 'string' && value.filename.length > 0 ? value.filename : arg.name;
+  const filename = typeof value.filename === 'string' && value.filename.length > 0 ? value.filename : (arg.apiName ?? arg.name);
   const mimeType = typeof value.mimeType === 'string' && value.mimeType.length > 0 ? value.mimeType : 'application/octet-stream';
   return { bytes, filename, mimeType };
 }
@@ -134,11 +134,11 @@ function buildFormBody(tool, args) {
     if (value === undefined) continue;
     if (arg.binary) {
       const part = filePart(arg, value);
-      form.append(arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
+      form.append(arg.apiName ?? arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
     } else if (typeof value === 'object' && value !== null) {
-      form.append(arg.name, JSON.stringify(value));
+      form.append(arg.apiName ?? arg.name, JSON.stringify(value));
     } else {
-      form.append(arg.name, String(value));
+      form.append(arg.apiName ?? arg.name, String(value));
     }
     parts++;
   }

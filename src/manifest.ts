@@ -391,6 +391,7 @@ function multipartFieldArg(field: MultipartField): ToolArg {
   if (field.isBinary) {
     return {
       name: field.name,
+      apiName: field.name,
       location: 'body',
       apiFieldPath: [],
       binary: true,
@@ -418,7 +419,7 @@ function multipartFieldArg(field: MultipartField): ToolArg {
   } else {
     schema.type = field.type;
   }
-  return { name: field.name, location: 'body', apiFieldPath: [], required: field.required, schema };
+  return { name: field.name, apiName: field.name, location: 'body', apiFieldPath: [], required: field.required, schema };
 }
 
 /** Content types declared on success (2xx or default) responses, in spec order. */
