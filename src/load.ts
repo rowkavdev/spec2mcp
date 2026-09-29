@@ -77,6 +77,8 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   const components = anyDoc.components as Record<string, unknown>;
   if (typeof components.schemas !== 'object' || components.schemas === null) components.schemas = {};
 
+  sanitizeComponentKeys(doc);
+
   // OpenAPI 3.1 upgrades schemas to JSON Schema 2020-12, where `type` may be
   // a union array. Forge reads `type` as a single string, so collapse unions
   // before the document reaches the resolver. The collapse runs for every
@@ -88,6 +90,62 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
 
   ensureOperationIds(doc);
   return doc;
+}
+
+
+/**
+ * JSON Pointer escape normalization (#96). The vendored resolver walks
+ * `#/...` $ref segments literally - resolveDocRef never decodes `~1`/`~0` -
+ * so a $ref to a component key containing "/" or "~" fails to resolve and
+ * the schema collapses to an open `{type: "object"}` with no properties.
+ * (Forge's resolveSchemaRef unescapes correctly, so parameter refs are
+ * fine; only doc-path walks miss.) Rather than patch the vendored code,
+ * normalize at load: rename the affected component keys to escape-free
+ * unique names and rewrite every internal $ref that targets them, so the
+ * literal walk and the unescaping walk agree.
+ */
+function sanitizeComponentKeys(doc: OpenAPIV3.Document): void {
+  const components = (doc as unknown as Record<string, unknown>).components as Record<string, unknown> | undefined;
+  if (!components || typeof components !== 'object') return;
+  const renames = new Map<string, string>();
+  for (const [section, bucket] of Object.entries(components)) {
+    if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) continue;
+    const rec = bucket as Record<string, unknown>;
+    const taken = new Set(Object.keys(rec));
+    for (const key of Object.keys(rec)) {
+      if (!key.includes('/') && !key.includes('~')) continue;
+      let candidate = key.replaceAll('/', '_').replaceAll('~', '_');
+      while (taken.has(candidate)) candidate += '_';
+      taken.add(candidate);
+      rec[candidate] = rec[key];
+      delete rec[key];
+      // JSON Pointer escaping order: "~" first, then "/".
+      const escaped = key.replaceAll('~', '~0').replaceAll('/', '~1');
+      renames.set(`#/components/${section}/${escaped}`, `#/components/${section}/${candidate}`);
+    }
+  }
+  if (renames.size === 0) return;
+  const rewriteRefs = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) rewriteRefs(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const rec = node as Record<string, unknown>;
+    for (const [key, value] of Object.entries(rec)) {
+      if (key === '$ref' && typeof value === 'string') {
+        for (const [oldRef, newRef] of renames) {
+          if (value === oldRef || value.startsWith(`${oldRef}/`)) {
+            rec.$ref = newRef + value.slice(oldRef.length);
+            break;
+          }
+        }
+      } else {
+        rewriteRefs(value);
+      }
+    }
+  };
+  rewriteRefs(doc);
 }
 
 const JSON_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);

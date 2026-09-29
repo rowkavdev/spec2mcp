@@ -255,3 +255,17 @@ test('#88 a 3.0.x body property typed as a union is collapsed, not dropped', asy
     'off-spec union normalizes to the #81 nullable form',
   );
 });
+
+test('#96 an escaped-key $ref resolves instead of collapsing to an open object', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/escaped-keys.yaml', import.meta.url)));
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const getPet = m.tools.find((t) => t.name === 'get_pet');
+  assert.ok(getPet?.outputSchema);
+  const props = getPet.outputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+  assert.ok(props, 'escaped component key must not collapse to an empty schema');
+  assert.equal(props.id?.type, 'string');
+  assert.equal(props.name?.type, 'string');
+  assert.deepEqual(getPet.outputSchema.required, ['id']);
+});
