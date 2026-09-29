@@ -188,15 +188,16 @@ test('tools/call returns structuredContent for an object response', async () => 
   assert.match(content[0]!.text, /"id": 7/, 'text content kept alongside structuredContent');
 });
 
-test('tools/call falls back to text-only when the response drifts from the outputSchema', async () => {
+test('tools/call returns a tool error when the response drifts from the outputSchema', async () => {
   // The mock answers POST /pets with { ok: true }, which is not Pet-shaped:
   // the runtime must not attach structuredContent the SDK client would reject.
   const res = await rpc('tools/call', { name: 'create_pet', arguments: { name: 'Rex' } });
   const result = res.result as Record<string, unknown>;
-  assert.equal(result.isError, undefined, 'drift is not a tool error');
+  assert.equal(result.isError, true, 'drift must be a tool error');
   assert.equal(result.structuredContent, undefined, 'drifted response is not attached');
   const content = result.content as { type: string; text: string }[];
   assert.match(content[0]!.text, /"ok": true/, 'text content survives the fallback');
+  assert.match(content[1]!.text, /outputSchema fallback/);
 });
 
 test('tools/call wraps an array response under result', async () => {

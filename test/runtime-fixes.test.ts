@@ -147,8 +147,8 @@ test('#36 a field named __proto__ survives into the JSON body', async () => {
 
 test('#37 structuredContent honours SPEC2MCP_MAX_RESPONSE_CHARS', async () => {
   const res = await callTool('get_big', {});
-  assert.ok(!res.isError);
-  assert.equal(res.structuredContent, undefined, 'oversized structured payload degrades to text-only');
+  assert.equal(res.isError, true);
+  assert.equal(res.structuredContent, undefined, 'oversized structured payload becomes a tool error');
   assert.match(res.content?.[0]?.text ?? '', /truncated/);
 });
 

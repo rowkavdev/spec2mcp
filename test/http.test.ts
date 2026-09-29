@@ -26,7 +26,7 @@ test('generated project serves Streamable HTTP with SSE, independent sessions an
   const api = createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     // Pet-shaped: the SDK client validates structuredContent against the tool's outputSchema.
-    res.end(JSON.stringify({ id: 42, name: 'Rex', path: req.url }));
+    res.end(JSON.stringify(req.method === 'POST' ? { ok: true } : { id: 42, name: 'Rex', path: req.url }));
   });
   await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
   const apiAddress = api.address();
@@ -60,6 +60,12 @@ test('generated project serves Streamable HTTP with SSE, independent sessions an
       const call = await client.callTool({ name: 'get_pet', arguments: { petId: 42 } });
       assert.equal(call.isError, undefined);
       assert.match((call.content as { text: string }[])[0]!.text, /pets\/42/);
+      // Real SDK client used to throw MCP -32600 for text-only success here.
+      const drift = await client.callTool({ name: 'create_pet', arguments: { name: 'Rex' } });
+      assert.equal(drift.isError, true);
+      assert.equal(drift.structuredContent, undefined);
+      assert.match((drift.content as { text: string }[])[0]!.text, /"ok": true/);
+      assert.match((drift.content as { text: string }[])[1]!.text, /outputSchema fallback/);
     }
     const unknown = await fetch(url, { method: 'GET', headers: { 'mcp-session-id': 'unknown', accept: 'text/event-stream' } });
     assert.equal(unknown.status, 404);
