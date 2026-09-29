@@ -132,7 +132,7 @@ CI also runs a compat matrix over pinned snapshots of four large public APIs, ve
 | [Stripe](https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json) | 3.0.0 | 612 | Basic-auth scheme maps to `STRIPE_API_BASIC_AUTH` |
 | [Kubernetes (core/v1)](https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/v3/api__v1_openapi.json) | 3.0.0 | 236 | No server URL in the spec - set `KUBERNETES_BASE_URL` |
 | [Spotify Web API](https://developer.spotify.com/reference/web-api/open-api-schema.yaml) | 3.0.3 | 96 | References an external file (`../policies.yaml`), bundled at load |
-| [Vercel](https://openapi.vercel.sh/) | 3.0.3 | 431 | Auth is declared per-operation; only root-level security maps today (roadmap) |
+| [Vercel](https://openapi.vercel.sh/) | 3.0.3 | 431 | Auth is declared per-operation; each tool picks up its operation-level schemes |
 
 ## OpenAPI 3.1
 
