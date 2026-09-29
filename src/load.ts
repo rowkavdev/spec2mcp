@@ -30,8 +30,11 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   }
 
   // Bundle external $refs (files/URLs) into one document. Internal refs are
-  // left as refs - Forge's resolver handles those.
-  const doc = (await $RefParser.bundle(raw as never, {
+  // left as refs - Forge's resolver handles those. Bundle from the original
+  // path/URL (not the parsed object) so relative external refs like
+  // "../policies.yaml" resolve against the spec's own location. For URLs this
+  // fetches the document a second time - acceptable for a generator.
+  const doc = (await $RefParser.bundle(input as never, {
     dereference: { circular: 'ignore' },
   })) as unknown as OpenAPIV3.Document;
 
