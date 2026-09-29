@@ -43,3 +43,20 @@ paths:
       responses:
         '201':
           description: Created
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [nickname]
+                  properties:
+                    nickname:
+                      type: ["string", "null"]
+      responses:
+        '201':
+          description: Created

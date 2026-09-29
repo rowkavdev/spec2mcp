@@ -156,12 +156,31 @@ function argSchema(p: ParameterInfo): Record<string, unknown> {
  * location ("uris_body"), preserving the API's wire name in apiName.
  */
 /**
+ * Merge the `properties` a schema contributes, including across allOf
+ * branches (Forge flattens allOf when it derives body params, so the
+ * nullability walk must see the same merged view - #87).
+ */
+function mergedProperties(schema: Record<string, unknown> | undefined, seen = new Set<unknown>()): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object' || seen.has(schema)) return {};
+  seen.add(schema);
+  const out: Record<string, unknown> = {};
+  if (Array.isArray(schema.allOf)) {
+    for (const branch of schema.allOf) {
+      Object.assign(out, mergedProperties(resolveDocRef(branch) as Record<string, unknown> | undefined, seen));
+    }
+  }
+  const own = schema.properties as Record<string, unknown> | undefined;
+  if (own && typeof own === 'object') Object.assign(out, own);
+  return out;
+}
+
+/**
  * Forge's adapted parameter view drops nullability (#81): a body property
  * typed `["string", "null"]` arrives as a plain string argument, and input
  * validation would reject a valid null. Recover the marker from the loaded
  * document by walking the requestBody schema along the argument's field
- * path. Bodies flattened from allOf do not resolve through this walk; those
- * keep the adapted view, matching the pre-#81 behavior.
+ * path, merging allOf branches like Forge's flattening does (#87). Shapes
+ * the walk cannot resolve (e.g. oneOf-derived args) keep the adapted view.
  */
 function bodyPropertyNullable(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath: string[]): boolean {
   const requestBody = resolveDocRef(
@@ -170,8 +189,7 @@ function bodyPropertyNullable(doc: OpenAPIV3.Document, op: OperationInfo, fieldP
   let schema = resolveDocRef(requestBody?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
   for (const segment of fieldPath) {
     if (!schema || typeof schema !== 'object') return false;
-    const properties = schema.properties as Record<string, unknown> | undefined;
-    schema = resolveDocRef(properties?.[segment]) as Record<string, unknown> | undefined;
+    schema = resolveDocRef(mergedProperties(schema)[segment]) as Record<string, unknown> | undefined;
   }
   return schema?.nullable === true;
 }

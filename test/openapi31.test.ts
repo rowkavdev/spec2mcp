@@ -169,3 +169,19 @@ test('#81 nullability survives into the request input schema', async () => {
   assert.equal(verbose?.schema.type, 'number');
   assert.equal(verbose?.required, false);
 });
+
+test('#87 allOf-flattened nullable body property keeps its null branch', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const createOrder = m.tools.find((t) => t.name === 'create_order');
+  assert.ok(createOrder);
+  const nickname = createOrder.args.find((a) => a.name === 'nickname');
+  assert.equal(nickname?.required, true, 'nullable allOf body property stays required');
+  assert.deepEqual(
+    (createOrder.inputSchema.properties as Record<string, unknown>).nickname,
+    { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    'nullability survives the allOf flattening',
+  );
+});
