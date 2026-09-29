@@ -31,6 +31,8 @@ export type ToolDef = {
   requestBodyIsArray?: boolean;
   args: ToolArg[];
   inputSchema: Record<string, unknown>;
+  /** Names of schemes used by this operation; [] explicitly sends no auth. */
+  authSchemeNames: string[];
 };
 
 export type Manifest = {
@@ -76,7 +78,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
   const info = doc.info ?? ({ title: 'API', version: '0.0.0' } as OpenAPIV3.Document['info']);
   const apiTitle = info.title ?? 'API';
   const envPrefix = toEnvPrefix(opts.serverName ?? apiTitle);
-  const auth = buildAuthPlan(doc, envPrefix);
+  const { auth, forOperation } = buildAuthPlan(doc, envPrefix);
 
   const firstServer = doc.servers?.[0]?.url ?? '';
   const baseUrl = opts.baseUrl ?? firstServer;
@@ -147,6 +149,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       method: op.method.toUpperCase(),
       path: op.path,
       args,
+      authSchemeNames: forOperation(
+        doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods] as OpenAPIV3.OperationObject ?? {},
+        `${op.method.toUpperCase()} ${op.path}`,
+      ),
       inputSchema: { type: 'object', properties, required: requiredArgs, additionalProperties: false },
     };
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;

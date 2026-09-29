@@ -98,6 +98,12 @@ function generatedReadme(manifest: Manifest): string {
     }
     lines.push('');
   }
+  if (manifest.auth.warnings.length > 0) {
+    lines.push('## Security warnings');
+    lines.push('');
+    for (const warning of manifest.auth.warnings) lines.push(`- ${warning}`);
+    lines.push('');
+  }
   lines.push(`Base URL: \`${manifest.baseUrl || '(set ' + manifest.auth.baseUrlEnvVar + ')'}\` - override with \`${manifest.auth.baseUrlEnvVar}\`.`);
   lines.push('');
   return lines.join('\n');

@@ -41,8 +41,12 @@ function setNested(target, fieldPath, value) {
 /** Apply the manifest's auth schemes. Missing env vars are skipped, not
  * fatal: many APIs allow anonymous calls, and an API that needs auth answers
  * with its own 401. Unset vars are listed once at server start. */
-function applyAuth(manifest, url, headers) {
-  for (const scheme of manifest.auth?.schemes ?? []) {
+function applyAuth(manifest, tool, url, headers) {
+  // Older manifests have no per-tool selection and retain their root-level auth.
+  const schemes = tool.authSchemeNames === undefined
+    ? (manifest.auth?.schemes ?? [])
+    : (manifest.auth?.schemes ?? []).filter((scheme) => tool.authSchemeNames.includes(scheme.schemeName));
+  for (const scheme of schemes) {
     const value = process.env[scheme.envVar];
     if (!value) continue;
     switch (scheme.kind) {
@@ -107,7 +111,7 @@ async function executeTool(manifest, tool, args) {
     headers.set(arg.name, String(value));
   }
 
-  applyAuth(manifest, url, headers);
+  applyAuth(manifest, tool, url, headers);
 
   let body;
   if (tool.args.some((a) => a.location === 'body')) {

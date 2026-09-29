@@ -51,6 +51,7 @@ async function cmdGenerate(spec: string, flags: { out?: string; name?: string; b
   const doc = await loadSpec(spec);
   const forge = await init(doc);
   const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl });
+  for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
   const files = await forge.transform(createMcpTransformer(doc, { ...flags, runtimeSource: await runtimeSource() }));
   await forge.finalize(outDir, files, { clean: true });
@@ -69,6 +70,7 @@ async function cmdServe(spec: string, flags: { name?: string; baseUrl?: string }
   const doc = await loadSpec(spec);
   await init(doc);
   const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl });
+  for (const warning of manifest.auth.warnings) console.error(`warning: ${warning}`);
   const runtimeUrl = new URL('../runtime/server.mjs', import.meta.url).href;
   const { runServer } = (await import(runtimeUrl)) as { runServer: (manifest: import('./manifest.js').Manifest) => Promise<void> };
   await runServer(manifest);
