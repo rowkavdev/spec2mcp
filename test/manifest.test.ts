@@ -1,0 +1,101 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { init } from '../vendor/forge/index.js';
+import { loadSpec } from '../src/load.js';
+import { buildManifest } from '../src/manifest.js';
+
+const PETSTORE = fileURLToPath(new URL('./fixtures/petstore.yaml', import.meta.url));
+const MINIMAL = fileURLToPath(new URL('./fixtures/minimal.json', import.meta.url));
+
+test('manifest maps every operation to an MCP-safe tool', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  assert.equal(m.apiTitle, 'Pet Store');
+  assert.equal(m.apiVersion, '1.2.3');
+  assert.equal(m.baseUrl, 'https://api.petstore.test/v1');
+
+  const names = m.tools.map((t) => t.name);
+  // 7 operations in the fixture (incl. one synthesised id and one deduped duplicate)
+  assert.equal(m.tools.length, 7);
+  for (const n of names) assert.match(n, /^[a-zA-Z0-9_-]{1,64}$/);
+  assert.equal(new Set(names).size, names.length, 'tool names unique');
+  assert.ok(names.includes('list_pets'));
+  assert.ok(names.includes('list_pets_2'), 'duplicate operationId deduped');
+  assert.ok(names.includes('get_legacy'), 'missing operationId synthesised from method+path');
+});
+
+test('args carry location, required-ness and JSON schemas', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+  const getPet = m.tools.find((t) => t.name === 'get_pet');
+  assert.ok(getPet);
+  const petId = getPet.args.find((a) => a.name === 'petId');
+  assert.equal(petId?.location, 'path');
+  assert.equal(petId?.required, true);
+  assert.equal(petId?.schema.type, 'string', 'Forge types path params as strings (they serialise into the URL)');
+  assert.deepEqual(getPet.inputSchema.required, ['petId']);
+
+  const listPets = m.tools.find((t) => t.name === 'list_pets');
+  const limit = listPets?.args.find((a) => a.name === 'limit');
+  assert.equal(limit?.location, 'query');
+  assert.equal(limit?.required, false);
+  assert.equal(limit?.schema.default, 20);
+  const tags = listPets?.args.find((a) => a.name === 'tags');
+  assert.equal(tags?.schema.type, 'array');
+  assert.deepEqual((tags?.schema.items as Record<string, unknown>).enum, ['cat', 'dog', 'fish']);
+
+  const del = m.tools.find((t) => t.name === 'delete_pet');
+  const confirm = del?.args.find((a) => a.name === 'X-Confirm');
+  assert.equal(confirm?.location, 'header');
+  assert.equal(confirm?.required, true);
+});
+
+test('nested JSON bodies flatten to dotted args with apiFieldPath', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+  const create = m.tools.find((t) => t.name === 'create_pet');
+  assert.ok(create);
+  assert.equal(create.contentType, 'application/json');
+  const name = create.args.find((a) => a.name === 'name');
+  assert.equal(name?.location, 'body');
+  assert.equal(name?.required, true, 'name is required at body root');
+  const street = create.args.find((a) => a.name === 'address.street');
+  assert.deepEqual(street?.apiFieldPath, ['address', 'street']);
+  assert.equal(street?.required, false, 'address itself is optional at root');
+});
+
+test('non-JSON bodies fall back to a single raw body arg', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+  const upload = m.tools.find((t) => t.name === 'upload_file');
+  assert.ok(upload);
+  assert.equal(upload.args.length, 1);
+  assert.equal(upload.args[0]?.name, 'body');
+  assert.equal(upload.contentType, 'application/octet-stream');
+});
+
+test('auth plan maps bearer scheme to an env var', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+  assert.equal(m.auth.schemes.length, 1, 'only the first security requirement applies (MVP)');
+  assert.equal(m.auth.schemes[0]?.kind, 'bearer');
+  assert.equal(m.auth.schemes[0]?.envVar, 'PET_STORE_BEARER_AUTH');
+  assert.equal(m.auth.baseUrlEnvVar, 'PET_STORE_BASE_URL');
+});
+
+test('spec without servers or security yields empty auth and no base URL', async () => {
+  const doc = await loadSpec(MINIMAL);
+  await init(doc);
+  const m = buildManifest(doc);
+  assert.equal(m.baseUrl, '');
+  assert.equal(m.auth.schemes.length, 0);
+  assert.equal(m.tools.length, 1);
+  assert.equal(m.tools[0]?.name, 'get_status');
+});
