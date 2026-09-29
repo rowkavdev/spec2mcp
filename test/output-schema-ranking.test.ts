@@ -176,3 +176,73 @@ test('#65 wildcard response media does not advertise an outputSchema', async () 
   const m = buildManifest(d);
   assert.equal(m.tools[0]?.outputSchema, undefined, 'wildcard media declares no JSON commitment');
 });
+
+test('#76 differing JSON media alternatives under one status force text-only', async () => {
+  const d = doc({
+    '/thing': {
+      get: {
+        operationId: 'getThing',
+        responses: {
+          '200': {
+            description: 'json or problem+json',
+            content: {
+              'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } },
+              'application/problem+json': { schema: { type: 'object', properties: { error: { type: 'string' } } } },
+            },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  // Both JSON alternatives can be the actual 200 response; advertising the
+  // application/json shape would reject a valid problem+json success.
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'a valid problem+json 200 must not be rejected');
+});
+
+test('#76 a schema-less JSON media alternative under one status forces text-only', async () => {
+  const d = doc({
+    '/thing': {
+      get: {
+        operationId: 'getThing',
+        responses: {
+          '200': {
+            description: 'json or unspecified problem+json',
+            content: {
+              'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } },
+              'application/problem+json': {},
+            },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  // The schema-less JSON alternative admits any shape.
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'schema-less JSON alternative admits any shape');
+});
+
+test('#76 agreeing JSON media alternatives under one status are advertised', async () => {
+  const shape = { type: 'object', properties: { id: { type: 'string' } } };
+  const d = doc({
+    '/thing': {
+      get: {
+        operationId: 'getThing',
+        responses: {
+          '200': {
+            description: 'same shape as json and vendor json',
+            content: {
+              'application/json': { schema: shape },
+              'application/vnd.example+json': { schema: shape },
+            },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  assert.equal(m.tools[0]?.outputSchema?.type, 'object', 'equal shapes across JSON alternatives are honest');
+});
