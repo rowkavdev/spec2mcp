@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { chmod } from 'node:fs/promises';
+import { chmod, copyFile, writeFile } from 'node:fs/promises';
 
 await build({
   entryPoints: ['src/cli.ts'],
@@ -13,4 +13,6 @@ await build({
   // Vendored forge TS is bundled in; npm packages stay external.
 });
 await chmod('dist/cli.mjs', 0o755);
+await copyFile('vendor/forge/LICENSE', 'dist/LICENSE-forge');
+await writeFile('dist/NOTICE-forge', 'Bundled Forge source is Apache-2.0, copyright Cloudflare, Inc. The complete license is in LICENSE-forge.\n');
 console.log('built dist/cli.mjs');
