@@ -2,6 +2,7 @@
   "generator": "spec2mcp",
   "apiTitle": "Pet Store",
   "apiVersion": "1.0.0",
+  "specVersion": "3.0.3",
   "serverName": "petstore-readonly",
   "baseUrl": "https://api.petstore.example/v1",
   "auth": {
@@ -9,6 +10,7 @@
     "warnings": [],
     "baseUrlEnvVar": "PETSTORE_READONLY_BASE_URL"
   },
+  "webhooks": [],
   "tools": [
     {
       "name": "list_pets",
