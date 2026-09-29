@@ -18,6 +18,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_CHARS = 50_000;
@@ -44,6 +45,17 @@ function textResult(text) {
 
 function errorResult(text) {
   return { content: [{ type: 'text', text }], isError: true };
+}
+
+/** SDK clients require structuredContent on successful calls with outputSchema.
+ * Keep the upstream content, but mark an unrepresentable response as a tool error. */
+function outputFallback(result, tool, note) {
+  if (!tool.outputSchema) return result;
+  return {
+    ...result,
+    isError: true,
+    content: [...result.content, { type: 'text', text: `[outputSchema fallback: ${note}]` }],
+  };
 }
 
 function setNested(target, fieldPath, value) {
@@ -196,280 +208,13 @@ function oversizedBinaryResult(byteLength, contentType) {
   );
 }
 
-/** Structural equality over JSON values, for enum and const checks. */
-function jsonEqual(a, b) {
-  if (a === b) return true;
-  if (typeof a !== typeof b || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, i) => jsonEqual(item, b[i]));
-  }
-  if (typeof a === 'object') {
-    const aKeys = Object.keys(a);
-    return aKeys.length === Object.keys(b).length && aKeys.every((key) => Object.hasOwn(b, key) && jsonEqual(a[key], b[key]));
-  }
-  return false;
-}
-
-function isObjectValue(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function typeMatches(value, type) {
-  switch (type) {
-    case 'string': return typeof value === 'string';
-    case 'number': return typeof value === 'number';
-    case 'integer': return Number.isInteger(value);
-    case 'boolean': return typeof value === 'boolean';
-    case 'array': return Array.isArray(value);
-    case 'object': return isObjectValue(value);
-    case 'null': return value === null;
-    default: return true; // Unknown type keyword: treat as an annotation.
-  }
-}
-
-function isIpv4(value) {
-  const parts = value.split('.');
-  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255 && (part === '0' || !part.startsWith('0')));
-}
-
-const IPV6_GROUP_RE = /^[0-9a-fA-F]{1,4}$/;
-
-function isIpv6(value) {
-  if (value.length < 2 || value.length > 45) return false;
-  const halves = value.split('::');
-  if (halves.length > 2) return false;
-  let groups = [];
-  for (const [i, half] of halves.entries()) {
-    if (half === '') continue;
-    const parts = half.split(':');
-    const last = parts[parts.length - 1];
-    if (last.includes('.')) {
-      // An embedded IPv4 address may only appear as the final group.
-      if (i !== halves.length - 1 || !isIpv4(last)) return false;
-      parts.pop();
-      groups = groups.concat(parts, ['0', '0']);
-    } else {
-      groups = groups.concat(parts);
-    }
-  }
-  if (!groups.every((group) => IPV6_GROUP_RE.test(group))) return false;
-  return halves.length === 2 ? groups.length <= 7 : groups.length === 8;
-}
-
-const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-function isDate(value) {
-  const match = DATE_RE.exec(value);
-  if (!match) return false;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
-
-const TIME_RE = /^(\d{2}):(\d{2}):(\d{2})(\.\d+)?$/;
-const DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:?\d{2})$/;
-
-function isTimeParts(hour, minute, second) {
-  return hour <= 23 && minute <= 59 && second <= 60; // 60: leap second, as ajv-formats allows.
-}
-
-function isDateTime(value) {
-  const match = DATE_TIME_RE.exec(value);
-  if (!match || !isDate(match[1])) return false;
-  return isTimeParts(Number(match[2]), Number(match[3]), Number(match[4]));
-}
-
-function isUri(value) {
-  try {
-    new URL(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Common OpenAPI string formats, mirroring the formats MCP SDK clients check
- * (ajv-formats, full mode). Each takes an already-confirmed string. */
-const STRING_FORMAT_CHECKS = {
-  'date-time': isDateTime,
-  date: isDate,
-  time: (v) => {
-    const match = TIME_RE.exec(v);
-    return match !== null && isTimeParts(Number(match[1]), Number(match[2]), Number(match[3]));
-  },
-  email: (v) => v.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(v),
-  uri: isUri,
-  url: isUri,
-  uuid: (v) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v),
-  hostname: (v) => v.length <= 253 && /^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/.test(v),
-  ipv4: isIpv4,
-  ipv6: isIpv6,
-  byte: (v) => v.length % 4 === 0 && BASE64_RE.test(v),
-};
-
-/** Numeric formats from OpenAPI (int32/int64), mirroring ajv-formats. */
-const NUMBER_FORMAT_CHECKS = {
-  int32: (v) => Number.isInteger(v) && v >= -2147483648 && v <= 2147483647,
-  int64: (v) => Number.isSafeInteger(v),
-  float: (v) => Number.isFinite(v),
-  double: (v) => Number.isFinite(v),
-};
-
-/** Compilation depth cap: deeper (hand-written or hostile) schemas compile to
- * pass-through rather than recursing without bound. Generator output is
- * already depth-capped, so this only guards non-generated manifests. */
-const MAX_VALIDATOR_DEPTH = 24;
-
-/**
- * Compile a manifest outputSchema into a plain closure `(value) => boolean`,
- * run against candidate structuredContent before it is attached. Compilation
- * walks the schema once (at server start, per tool); the returned closure
- * walks only the response data, so call-time cost stays proportional to the
- * payload. Keywords the compiler does not know are treated as annotations and
- * ignored, matching how lenient validators treat unknown keywords; anything
- * unrecognisable compiles to pass-through.
- */
+/** Compile once per tool at startup with the same validator used by MCP SDK
+ * clients. Avoid a second JSON Schema implementation with divergent formats,
+ * equality, Unicode length and numeric range rules. */
+const sdkOutputValidator = new AjvJsonSchemaValidator();
 function compileOutputValidator(schema) {
-  return compileSchemaNode(schema, 0);
-}
-
-function compileSchemaNode(schema, depth) {
-  if (!isObjectValue(schema) || depth > MAX_VALIDATOR_DEPTH) {
-    return () => true;
-  }
-  const checks = [];
-
-  if (schema.type !== undefined) {
-    const types = (Array.isArray(schema.type) ? schema.type : [schema.type]).filter((t) => typeof t === 'string');
-    if (types.length > 0) checks.push((v) => types.some((t) => typeMatches(v, t)));
-  }
-  if (Array.isArray(schema.enum)) {
-    const allowed = schema.enum;
-    checks.push((v) => allowed.some((item) => jsonEqual(item, v)));
-  }
-  if (Object.hasOwn(schema, 'const')) {
-    checks.push((v) => jsonEqual(schema.const, v));
-  }
-
-  // String constraints (no-ops on non-strings, per JSON Schema).
-  if (typeof schema.minLength === 'number') checks.push((v) => typeof v !== 'string' || v.length >= schema.minLength);
-  if (typeof schema.maxLength === 'number') checks.push((v) => typeof v !== 'string' || v.length <= schema.maxLength);
-  if (typeof schema.pattern === 'string') {
-    let pattern;
-    try {
-      pattern = new RegExp(schema.pattern);
-    } catch {
-      pattern = undefined; // Invalid pattern: treat as an annotation.
-    }
-    if (pattern) checks.push((v) => typeof v !== 'string' || pattern.test(v));
-  }
-
-  // Number constraints (no-ops on non-numbers). Both the numeric
-  // (draft-06+) and boolean (OpenAPI 3.0) exclusive bound forms.
-  if (typeof schema.minimum === 'number') {
-    const exclusive = schema.exclusiveMinimum === true;
-    checks.push((v) => typeof v !== 'number' || (exclusive ? v > schema.minimum : v >= schema.minimum));
-  }
-  if (typeof schema.exclusiveMinimum === 'number') checks.push((v) => typeof v !== 'number' || v > schema.exclusiveMinimum);
-  if (typeof schema.maximum === 'number') {
-    const exclusive = schema.exclusiveMaximum === true;
-    checks.push((v) => typeof v !== 'number' || (exclusive ? v < schema.maximum : v <= schema.maximum));
-  }
-  if (typeof schema.exclusiveMaximum === 'number') checks.push((v) => typeof v !== 'number' || v < schema.exclusiveMaximum);
-  if (typeof schema.multipleOf === 'number' && schema.multipleOf > 0) {
-    checks.push((v) => typeof v !== 'number' || v % schema.multipleOf === 0);
-  }
-
-  // Formats (unknown formats are annotations, as lenient validators treat them).
-  if (typeof schema.format === 'string') {
-    const stringCheck = STRING_FORMAT_CHECKS[schema.format];
-    if (stringCheck) checks.push((v) => typeof v !== 'string' || stringCheck(v));
-    const numberCheck = NUMBER_FORMAT_CHECKS[schema.format];
-    if (numberCheck) checks.push((v) => typeof v !== 'number' || numberCheck(v));
-  }
-
-  // Array constraints.
-  if (typeof schema.minItems === 'number') checks.push((v) => !Array.isArray(v) || v.length >= schema.minItems);
-  if (typeof schema.maxItems === 'number') checks.push((v) => !Array.isArray(v) || v.length <= schema.maxItems);
-  if (schema.uniqueItems === true) {
-    checks.push((v) => !Array.isArray(v) || new Set(v.map((item) => JSON.stringify(item))).size === v.length);
-  }
-  if (schema.items !== undefined) {
-    const itemCheck = compileSchemaNode(schema.items, depth + 1);
-    checks.push((v) => !Array.isArray(v) || v.every(itemCheck));
-  }
-
-  // Object constraints.
-  if (Array.isArray(schema.required)) {
-    const required = schema.required.filter((key) => typeof key === 'string');
-    checks.push((v) => !isObjectValue(v) || required.every((key) => Object.hasOwn(v, key)));
-  }
-  const compiledProps = new Map();
-  if (isObjectValue(schema.properties)) {
-    for (const [key, sub] of Object.entries(schema.properties)) {
-      compiledProps.set(key, compileSchemaNode(sub, depth + 1));
-    }
-  }
-  const compiledPatterns = [];
-  if (isObjectValue(schema.patternProperties)) {
-    for (const [source, sub] of Object.entries(schema.patternProperties)) {
-      try {
-        compiledPatterns.push([new RegExp(source), compileSchemaNode(sub, depth + 1)]);
-      } catch {
-        // Invalid pattern: skip it.
-      }
-    }
-  }
-  if (compiledProps.size > 0 || compiledPatterns.length > 0) {
-    checks.push((v) => {
-      if (!isObjectValue(v)) return true;
-      for (const [key, check] of compiledProps) {
-        if (Object.hasOwn(v, key) && !check(v[key])) return false;
-      }
-      for (const [re, check] of compiledPatterns) {
-        for (const key of Object.keys(v)) {
-          if (re.test(key) && !check(v[key])) return false;
-        }
-      }
-      return true;
-    });
-  }
-  if (schema.additionalProperties === false || isObjectValue(schema.additionalProperties)) {
-    const known = new Set(compiledProps.keys());
-    const extraCheck = isObjectValue(schema.additionalProperties) ? compileSchemaNode(schema.additionalProperties, depth + 1) : undefined;
-    checks.push((v) => {
-      if (!isObjectValue(v)) return true;
-      for (const key of Object.keys(v)) {
-        if (known.has(key) || compiledPatterns.some(([re]) => re.test(key))) continue;
-        if (!extraCheck) return false;
-        if (!extraCheck(v[key])) return false;
-      }
-      return true;
-    });
-  }
-  if (typeof schema.minProperties === 'number') checks.push((v) => !isObjectValue(v) || Object.keys(v).length >= schema.minProperties);
-  if (typeof schema.maxProperties === 'number') checks.push((v) => !isObjectValue(v) || Object.keys(v).length <= schema.maxProperties);
-
-  // Combinators.
-  if (Array.isArray(schema.allOf)) {
-    const subs = schema.allOf.map((sub) => compileSchemaNode(sub, depth + 1));
-    checks.push((v) => subs.every((check) => check(v)));
-  }
-  if (Array.isArray(schema.anyOf)) {
-    const subs = schema.anyOf.map((sub) => compileSchemaNode(sub, depth + 1));
-    checks.push((v) => subs.some((check) => check(v)));
-  }
-  if (Array.isArray(schema.oneOf)) {
-    const subs = schema.oneOf.map((sub) => compileSchemaNode(sub, depth + 1));
-    checks.push((v) => subs.filter((check) => check(v)).length === 1);
-  }
-  if (schema.not !== undefined) {
-    const sub = compileSchemaNode(schema.not, depth + 1);
-    checks.push((v) => !sub(v));
-  }
-
-  return (value) => checks.every((check) => check(value));
+  const validate = sdkOutputValidator.getValidator(schema);
+  return (value) => validate(value).valid;
 }
 
 export { compileOutputValidator };
@@ -582,22 +327,22 @@ async function executeTool(manifest, tool, args, validateOutput) {
   }
 
   if (bytes.length === 0) {
-    return textResult(`(empty response, HTTP ${res.status})`);
+    return outputFallback(textResult(`(empty response, HTTP ${res.status})`), tool, 'empty upstream response has no structured content');
   }
   if (isImageType(contentType) || isAudioType(contentType)) {
-    if (bytes.length > MAX_BINARY_BYTES) return oversizedBinaryResult(bytes.length, contentType);
-    return { content: [{ type: isImageType(contentType) ? 'image' : 'audio', data: bytes.toString('base64'), mimeType: contentType }] };
+    if (bytes.length > MAX_BINARY_BYTES) return outputFallback(oversizedBinaryResult(bytes.length, contentType), tool, 'oversized binary response omitted');
+    return outputFallback({ content: [{ type: isImageType(contentType) ? 'image' : 'audio', data: bytes.toString('base64'), mimeType: contentType }] }, tool, 'non-JSON response has no structured content');
   }
   if (!isTextLikeType(contentType)) {
-    if (bytes.length > MAX_BINARY_BYTES) return oversizedBinaryResult(bytes.length, contentType);
-    return {
+    if (bytes.length > MAX_BINARY_BYTES) return outputFallback(oversizedBinaryResult(bytes.length, contentType), tool, 'oversized binary response omitted');
+    return outputFallback({
       content: [
         {
           type: 'resource',
           resource: { uri: url.toString(), mimeType: contentType || 'application/octet-stream', blob: bytes.toString('base64') },
         },
       ],
-    };
+    }, tool, 'non-JSON response has no structured content');
   }
 
   if (isJsonType(contentType)) {
@@ -611,36 +356,29 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }
   }
   const result = textResult(truncateText(renderText(bytes, contentType)));
-  // Tools with a manifest outputSchema also return structuredContent (MCP
-  // spec). The text content stays for clients without structured support.
-  // Degrade silently to text-only when the body didn't parse as JSON or the
-  // API returned a shape the schema can't hold - MCP SDK clients hard-error
-  // a result whose structuredContent fails the advertised outputSchema, so
-  // a drifted response is validated away rather than attached.
-  if (tool.outputSchema && isJsonType(contentType)) {
-    let parsed;
-    try {
-      parsed = JSON.parse(bytes.toString('utf8'));
-    } catch {
-      parsed = undefined;
+  // Successful calls advertising outputSchema must have valid structuredContent.
+  // A drifted, truncated or non-JSON upstream response stays visible as a tool
+  // error, rather than violating the MCP client protocol with text-only success.
+  if (tool.outputSchema) {
+    if (!isJsonType(contentType)) {
+      return outputFallback(result, tool, 'non-JSON response has no structured content');
     }
-    let structured;
-    if (parsed !== undefined) {
-      if (tool.outputWrap) {
-        structured = { result: parsed ?? null };
-      } else if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        structured = parsed;
-      }
+    const parsed = JSON.parse(bytes.toString('utf8')); // checked above
+    const structured = tool.outputWrap
+      ? { result: parsed }
+      : (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : undefined);
+    if (!structured) {
+      return outputFallback(result, tool, 'JSON response is not an object required by outputSchema');
     }
-    if (structured && validateOutput && !validateOutput(structured)) {
-      console.error(`${manifest.serverName}: ${tool.name}: response does not match its outputSchema; returning text-only`);
-      structured = undefined;
+    if (validateOutput && !validateOutput(structured)) {
+      console.error(`${manifest.serverName}: ${tool.name}: response does not match its outputSchema; returning tool error`);
+      return outputFallback(result, tool, 'response does not match the advertised outputSchema');
     }
-    if (structured && JSON.stringify(structured).length > MAX_RESPONSE_CHARS) {
-      console.error(`${manifest.serverName}: ${tool.name}: structuredContent exceeds SPEC2MCP_MAX_RESPONSE_CHARS; returning truncated text only`);
-      structured = undefined;
+    if (JSON.stringify(structured).length > MAX_RESPONSE_CHARS) {
+      console.error(`${manifest.serverName}: ${tool.name}: structuredContent exceeds SPEC2MCP_MAX_RESPONSE_CHARS; returning tool error`);
+      return outputFallback(result, tool, 'structured response exceeds SPEC2MCP_MAX_RESPONSE_CHARS');
     }
-    if (structured) result.structuredContent = structured;
+    result.structuredContent = structured;
   }
   return result;
 }
@@ -690,8 +428,8 @@ function createMcpServer(manifest) {
 
   const byName = new Map(manifest.tools.map((t) => [t.name, t]));
   // Compile outputSchema validators once at server start: the manifest's
-  // schemas are already dereferenced and size-capped at generation time, so
-  // call-time validation is plain closures over the response payload.
+  // schemas are already dereferenced and size-capped at generation time.
+  // Reusing compiled SDK/Ajv validators keeps call-time work payload-bound.
   const outputValidators = new Map();
   for (const tool of manifest.tools) {
     if (tool.outputSchema) outputValidators.set(tool.name, compileOutputValidator(tool.outputSchema));
