@@ -50,6 +50,8 @@ export type ToolDef = {
   contentType?: string;
   /** True when the request body is a top-level array - exposed as one "body" arg. */
   requestBodyIsArray?: boolean;
+  /** OpenAPI encoding rules keyed by form property name. */
+  formEncoding?: Record<string, { style?: string; explode?: boolean; unsupported?: string }>;
   /**
    * MCP outputSchema for the tool, emitted when the spec declares a known
    * JSON schema for a 2xx response. Always an object schema per the MCP
@@ -484,7 +486,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         apiFieldPath: [],
         required: bodyRequired,
         schema: contentType === 'application/x-www-form-urlencoded'
-          ? { type: 'object', description: op.requestBodyDescription ?? 'Form fields (arrays repeat the field name).' }
+          ? { type: 'object', description: op.requestBodyDescription ?? 'Form fields; array serialization follows the spec encoding.' }
           : contentType && (contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml'))
             ? { type: 'string', description: op.requestBodyDescription ?? 'Pre-serialized XML request body.' }
             : { description: op.requestBodyDescription ?? 'Raw request body.' },
@@ -519,6 +521,19 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     };
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
+    if (contentType === 'application/x-www-form-urlencoded') {
+      const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const encodings = requestBody?.content?.[contentType]?.encoding;
+      if (encodings && Object.keys(encodings).length > 0) {
+        tool.formEncoding = Object.fromEntries(Object.entries(encodings).map(([name, encoding]) => [name, {
+          ...(encoding.style !== undefined ? { style: encoding.style } : {}),
+          ...(encoding.explode !== undefined ? { explode: encoding.explode } : {}),
+          ...(encoding.contentType !== undefined || encoding.headers !== undefined || encoding.allowReserved !== undefined
+            ? { unsupported: 'contentType, headers or allowReserved' } : {}),
+        }]));
+      }
+    }
+
 
     const responseSchema = successJsonSchema(op);
     if (responseSchema) {
