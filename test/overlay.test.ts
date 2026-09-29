@@ -48,3 +48,31 @@ test('an overlay targeting a missing operationId fails loudly', async () => {
 test('a non-overlay file is rejected before Forge sees it', async () => {
   await assert.rejects(loadOverlays([PETSTORE]), /not an OpenAPI Overlay document/);
 });
+
+test('#50 removal deletes every matched sibling in multiple arrays', () => {
+  const doc = {
+    openapi: '3.0.0', info: { title: 'Arrays', version: '1' },
+    paths: {
+      '/a': { get: { tags: ['a', 'b', 'c', 'd'], security: [{ one: [] }, { two: [] }, { three: [] }] } },
+      '/b': { get: { tags: ['x', 'y', 'z'], security: [{ four: [] }, { five: [] }] } },
+    },
+    servers: [{ url: 'https://one.example' }, { url: 'https://two.example' }, { url: 'https://three.example' }],
+  } as unknown as Parameters<typeof applyOverlays>[0];
+  const overlay = {
+    name: 'array-removals',
+    overlay: {
+      overlay: '1.0.0', info: { title: 'Remove arrays', version: '1' },
+      actions: [
+        { target: '$.paths.*.get.tags[*]', remove: true },
+        { target: '$.paths.*.get.security[*]', remove: true },
+        { target: '$.servers[*]', remove: true },
+      ],
+    },
+  } as unknown as Parameters<typeof applyOverlays>[1][number];
+  applyOverlays(doc, [overlay]);
+  assert.deepEqual(doc.paths['/a']?.get?.tags, []);
+  assert.deepEqual(doc.paths['/b']?.get?.tags, []);
+  assert.deepEqual(doc.paths['/a']?.get?.security, []);
+  assert.deepEqual(doc.paths['/b']?.get?.security, []);
+  assert.deepEqual(doc.servers, []);
+});

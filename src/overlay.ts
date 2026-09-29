@@ -31,13 +31,25 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
       if (matches.length === 0) {
         throw new Error(`Overlay ${name} action ${i + 1} target matched nothing in the spec: ${target}`);
       }
-      for (const match of matches) {
-        if (remove === true) {
-          if (match.parent !== null && match.parentProperty !== null) {
-            if (Array.isArray(match.parent) && typeof match.parentProperty === 'number') match.parent.splice(match.parentProperty, 1);
-            else delete (match.parent as Record<string, unknown>)[String(match.parentProperty)];
+      if (remove === true) {
+        // JSONPath reports original array indices. Remove from the end of each
+        // parent so earlier deletions cannot shift later matches out of place.
+        const arrayMatches = new Map<unknown[], Set<number>>();
+        for (const match of matches) {
+          if (match.parent === null || match.parentProperty === null) continue;
+          if (Array.isArray(match.parent) && typeof match.parentProperty === 'number') {
+            const indices = arrayMatches.get(match.parent) ?? new Set<number>();
+            indices.add(match.parentProperty);
+            arrayMatches.set(match.parent, indices);
+          } else {
+            delete (match.parent as Record<string, unknown>)[String(match.parentProperty)];
           }
-        } else if (update !== undefined) {
+        }
+        for (const [parent, indices] of arrayMatches) {
+          for (const index of [...indices].sort((a, b) => b - a)) parent.splice(index, 1);
+        }
+      } else if (update !== undefined) {
+        for (const match of matches) {
           if (typeof match.value !== 'object' || match.value === null || Array.isArray(match.value)) {
             throw new Error(`Overlay ${name} action ${i + 1} target must resolve to an object for "update": ${target}`);
           }
