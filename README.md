@@ -74,6 +74,27 @@ The generated server's only dependency is `@modelcontextprotocol/sdk`.
 - JSON request bodies are flattened into arguments per field (`address.street`) and reconstructed into the nested body on the call. Array and free-form bodies become a single `body` argument.
 - Non-2xx responses come back as tool errors with the status and response body; missing required arguments fail before any request is made.
 
+## Select tools and save project settings
+
+Use repeatable `--include` and `--exclude` selectors with either an exact OpenAPI tag (`tag:catalog`) or an operationId glob (`operation:list*`). An unprefixed selector matches either an exact tag or an operationId glob. `*` matches any sequence and `?` one character; matching is case-sensitive. Includes are combined with OR, and excludes take priority. With no includes, all operations are eligible.
+
+```bash
+spec2mcp generate openapi.yaml --include 'tag:catalog' --exclude 'operation:delete*'
+```
+
+For reusable settings, put `spec2mcp.config.json` in the current directory (or pass `--config path/to/settings.json`):
+
+```json
+{
+  "name": "petstore",
+  "baseUrl": "https://api.example.com/v1",
+  "include": ["tag:catalog"],
+  "exclude": ["operation:delete*"]
+}
+```
+
+CLI flags override the corresponding config keys; repeat each flag to supply multiple selectors. Generation writes the effective settings to the generated project's `spec2mcp.config.json`. Its server reads that file at startup and can narrow its generated tools or override name and base URL without rebuilding. To expose additional operations, regenerate from the original spec. Environment `<PREFIX>_BASE_URL` still overrides the configured base URL at call time. `serve` reads the working directory's config too.
+
 ## Auth
 
 Auth comes from the spec's `securitySchemes`; the server reads secrets from environment variables at call time. Nothing secret is ever written into generated files.

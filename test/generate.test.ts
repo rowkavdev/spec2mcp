@@ -34,3 +34,39 @@ test('generate emits a complete project', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('project config persists resolved settings and CLI flags override them', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-config-'));
+  try {
+    const configPath = join(dir, 'settings.json');
+    const out = join(dir, 'custom-mcp');
+    await (await import('node:fs/promises')).writeFile(configPath, JSON.stringify({
+      name: 'configured', baseUrl: 'https://configured.test/v2', include: ['operation:list*'], exclude: ['operation:listPets_2'],
+    }));
+    const { stdout } = await run(process.execPath, [TSX, CLI, 'generate', PETSTORE, '--config', configPath,
+      '--out', out, '--name', 'overridden', '--exclude', 'operation:listPets']);
+    assert.match(stdout, /Generated 1 tools/);
+    const manifest = JSON.parse(await readFile(join(out, 'operations.json'), 'utf8'));
+    assert.equal(manifest.serverName, 'overridden');
+    assert.equal(manifest.baseUrl, 'https://configured.test/v2');
+    assert.deepEqual(manifest.tools.map((tool: { operationId: string }) => tool.operationId), ['listPets_2']);
+    const saved = JSON.parse(await readFile(join(out, 'spec2mcp.config.json'), 'utf8'));
+    assert.deepEqual(saved, {
+      name: 'overridden', baseUrl: 'https://configured.test/v2', include: ['operation:list*'], exclude: ['operation:listPets'],
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('malformed explicit config fails rather than silently generating', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-bad-config-'));
+  try {
+    const configPath = join(dir, 'bad.json');
+    await (await import('node:fs/promises')).writeFile(configPath, '{"include":"list*"}');
+    await assert.rejects(run(process.execPath, [TSX, CLI, PETSTORE, '--config', configPath, '--out', join(dir, 'out')]),
+      (error: unknown) => /include must be an array of non-empty strings/.test((error as { stderr: string }).stderr));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -178,6 +178,30 @@ async function executeTool(manifest, tool, args) {
   return result;
 }
 
+/** Runtime config can narrow the generated tool set without rebuilding. */
+function selected(tool, config) {
+  const matches = (selector) => {
+    const tagOnly = selector.startsWith('tag:');
+    const operationOnly = selector.startsWith('operation:');
+    const value = selector.slice(tagOnly ? 4 : operationOnly ? 10 : 0);
+    if (!value) return false;
+    if (!operationOnly && (tool.tags ?? []).includes(value)) return true;
+    if (tagOnly) return false;
+    const pattern = `^${[...value].map((char) => char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[\\^$+.()|[\]{}]/g, '\\$&')).join('')}$`;
+    return new RegExp(pattern).test(tool.operationId);
+  };
+  return (!(config.include?.length) || config.include.some(matches)) && !(config.exclude ?? []).some(matches);
+}
+
+function withConfig(manifest, config) {
+  return {
+    ...manifest,
+    serverName: config.name ?? manifest.serverName,
+    baseUrl: config.baseUrl ?? manifest.baseUrl,
+    tools: manifest.tools.filter((tool) => selected(tool, config)),
+  };
+}
+
 function createMcpServer(manifest) {
   const server = new Server(
     { name: manifest.serverName, version: manifest.apiVersion },
@@ -304,11 +328,27 @@ export async function runHttpServer(manifest, { port = 3000 } = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const manifestUrl = new URL('./operations.json', import.meta.url);
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
+  let config = {};
+  try {
+    config = JSON.parse(await readFile(new URL('./spec2mcp.config.json', import.meta.url), 'utf8'));
+    if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Expected a JSON object');
+    for (const key of ['include', 'exclude']) {
+      if (config[key] !== undefined && (!Array.isArray(config[key]) || !config[key].every((item) => typeof item === 'string'))) {
+        throw new Error(`${key} must be an array of strings`);
+      }
+    }
+    for (const key of ['name', 'baseUrl']) {
+      if (config[key] !== undefined && typeof config[key] !== 'string') throw new Error(`${key} must be a string`);
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw new Error(`Invalid spec2mcp.config.json: ${err.message}`);
+  }
+  const configured = withConfig(manifest, config);
   const args = process.argv.slice(2);
   if (args[0] === '--transport' && args[1] === 'http' && args.length === 2) {
-    await runHttpServer(manifest, { port: Number(process.env.PORT || '3000') });
+    await runHttpServer(configured, { port: Number(process.env.PORT || '3000') });
   } else if (args.length === 0 || (args[0] === '--transport' && args[1] === 'stdio' && args.length === 2)) {
-    await runServer(manifest);
+    await runServer(configured);
   } else {
     throw new Error('Usage: node server.mjs [--transport stdio|http] (HTTP port: PORT env var)');
   }
