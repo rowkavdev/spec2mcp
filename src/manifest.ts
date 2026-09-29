@@ -153,6 +153,27 @@ function argSchema(p: ParameterInfo): Record<string, unknown> {
  * argument. Keep the first occurrence bare and suffix later ones with their
  * location ("uris_body"), preserving the API's wire name in apiName.
  */
+/**
+ * Forge's adapted parameter view drops nullability (#81): a body property
+ * typed `["string", "null"]` arrives as a plain string argument, and input
+ * validation would reject a valid null. Recover the marker from the loaded
+ * document by walking the requestBody schema along the argument's field
+ * path. Bodies flattened from allOf do not resolve through this walk; those
+ * keep the adapted view, matching the pre-#81 behavior.
+ */
+function bodyPropertyNullable(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath: string[]): boolean {
+  const requestBody = resolveDocRef(
+    doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody,
+  ) as OpenAPIV3.RequestBodyObject | undefined;
+  let schema = resolveDocRef(requestBody?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
+  for (const segment of fieldPath) {
+    if (!schema || typeof schema !== 'object') return false;
+    const properties = schema.properties as Record<string, unknown> | undefined;
+    schema = resolveDocRef(properties?.[segment]) as Record<string, unknown> | undefined;
+  }
+  return schema?.nullable === true;
+}
+
 function disambiguateArgNames(args: ToolArg[]): void {
   const taken = new Set<string>();
   for (const a of args) {
@@ -265,6 +286,12 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     const nullableType = [out.type, 'null'];
     charge(budget, JSON.stringify(nullableType).length - JSON.stringify(out.type).length);
     out.type = nullableType;
+  } else if (target.nullable === true && Array.isArray(out.anyOf)) {
+    // A collapsed multi-type union carries nullability on the anyOf shell
+    // (#81); append the null branch rather than dropping it.
+    const nullBranch = { type: 'null' };
+    charge(budget, 1 + jsonLength(nullBranch, budget));
+    out.anyOf = [...out.anyOf, nullBranch];
   }
   return out;
 }
@@ -436,7 +463,12 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         // parent and its root field is required at body level. Nested optional
         // parents make this an approximation - documented in the README.
         const required = bodyRequired && p.required && rootRequired.has(p.apiFieldPath[0] ?? '');
-        args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema: argSchema(p) });
+        // Nullable is not optional (#81): a required property may still be
+        // null, so wrap the adapted view rather than loosening `required`.
+        const schema = bodyPropertyNullable(doc, op, p.apiFieldPath)
+          ? { anyOf: [argSchema(p), { type: 'null' }] }
+          : argSchema(p);
+        args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema });
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
       for (const field of op.multipart.fields) {

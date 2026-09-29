@@ -1,0 +1,45 @@
+openapi: 3.1.0
+info:
+  title: Nullable API
+  version: 1.0.0
+servers:
+  - url: https://nullable.example.com
+paths:
+  /pets:
+    get:
+      operationId: getPet
+      parameters:
+        - name: verbose
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, tag]
+                properties:
+                  id:
+                    type: string
+                  tag:
+                    type: ["string", "null"]
+                  rating:
+                    type: ["integer", "string", "null"]
+    post:
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname:
+                  type: ["string", "null"]
+      responses:
+        '201':
+          description: Created
