@@ -84,7 +84,7 @@ test('auth plan maps bearer scheme to an env var', async () => {
   const doc = await loadSpec(PETSTORE);
   await init(doc);
   const m = buildManifest(doc);
-  assert.equal(m.auth.schemes.length, 1, 'only the first security requirement applies (MVP)');
+  assert.equal(m.auth.schemes.length, 1, 'only the root requirement is used by this fixture');
   assert.equal(m.auth.schemes[0]?.kind, 'bearer');
   assert.equal(m.auth.schemes[0]?.envVar, 'PET_STORE_BEARER_AUTH');
   assert.equal(m.auth.baseUrlEnvVar, 'PET_STORE_BASE_URL');
@@ -98,4 +98,47 @@ test('spec without servers or security yields empty auth and no base URL', async
   assert.equal(m.auth.schemes.length, 0);
   assert.equal(m.tools.length, 1);
   assert.equal(m.tools[0]?.name, 'get_status');
+});
+
+
+test('operation security overrides root, including explicit anonymous and missing schemes', async () => {
+  const doc = await loadSpec(PETSTORE);
+  doc.paths['/pets']!.get!.security = [];
+  doc.paths['/pets']!.post!.security = [{ apiKeyQuery: [] }];
+  doc.paths['/pets/{petId}']!.delete!.security = [{ missingAuth: [] }];
+  await init(doc);
+  const m = buildManifest(doc);
+  const tool = (name: string) => m.tools.find((t) => t.name === name);
+  assert.deepEqual(tool('list_pets')?.authSchemeNames, []);
+  assert.deepEqual(tool('create_pet')?.authSchemeNames, ['apiKeyQuery']);
+  assert.deepEqual(tool('get_pet')?.authSchemeNames, ['bearerAuth']);
+  assert.deepEqual(tool('delete_pet')?.authSchemeNames, [], 'unresolved scheme must not leak root credentials');
+  assert.deepEqual(m.auth.schemes.map((s) => s.schemeName), ['apiKeyQuery', 'bearerAuth']);
+  assert.match(m.auth.warnings.join('\n'), /DELETE \/pets\/\{petId\}.*missingAuth.*continuing without it/);
+});
+
+test('single usable scheme is fallback for missing declaration or missing referenced scheme', async () => {
+  const doc = await loadSpec(PETSTORE);
+  delete doc.security;
+  delete doc.components!.securitySchemes!.apiKeyQuery;
+  doc.paths['/pets']!.post!.security = [{ nonexistent: [] }];
+  doc.paths['/pets/{petId}']!.get!.security = [];
+  await init(doc);
+  const m = buildManifest(doc);
+  assert.deepEqual(m.tools.find((t) => t.name === 'list_pets')?.authSchemeNames, ['bearerAuth']);
+  assert.deepEqual(m.tools.find((t) => t.name === 'create_pet')?.authSchemeNames, ['bearerAuth']);
+  assert.deepEqual(m.tools.find((t) => t.name === 'get_pet')?.authSchemeNames, []);
+  assert.match(m.auth.warnings.join('\n'), /nonexistent.*using "bearerAuth"/);
+});
+
+
+test('AND schemes combine, and a valid OR alternative wins over an unresolved one', async () => {
+  const doc = await loadSpec(PETSTORE);
+  doc.paths['/pets']!.get!.security = [{ bearerAuth: [], apiKeyQuery: [] }];
+  doc.paths['/pets']!.post!.security = [{ missingAuth: [] }, { apiKeyQuery: [] }];
+  await init(doc);
+  const m = buildManifest(doc);
+  assert.deepEqual(m.tools.find((t) => t.name === 'list_pets')?.authSchemeNames, ['bearerAuth', 'apiKeyQuery']);
+  assert.deepEqual(m.tools.find((t) => t.name === 'create_pet')?.authSchemeNames, ['apiKeyQuery']);
+  assert.deepEqual(m.auth.warnings, []);
 });
