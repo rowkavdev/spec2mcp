@@ -367,7 +367,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
       if (segment === '.' || segment === '..') {
         return errorResult(`Invalid path argument "${arg.name}": dot segments are not allowed.`);
       }
-      path = path.replace(`{${arg.apiName ?? arg.name}}`, segment);
+      path = path.replaceAll(`{${arg.apiName ?? arg.name}}`, () => segment);
     }
   }
   let url;

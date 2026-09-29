@@ -77,6 +77,7 @@ before(async () => {
       tool('xml', 'POST', [{ ...bodyArg(), schema: { type: 'string' } }], 'application/xml'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
       { ...tool('getFile', 'GET', [{ name: 'name', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{name}/data' },
+      { ...tool('repeatedPath', 'GET', [{ name: 'id', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{id}/related/{id}' },
       tool('vendorJsonString', 'POST', [bodyArg()], 'application/vnd.test+json'),
     ],
   };
@@ -290,4 +291,13 @@ test('label-style empty path values cannot normalize to a different endpoint', a
   const multi = await call('pathLabel', { tags: ['cat', 'dog'] });
   assert.equal(multi.isError, undefined);
   assert.equal(seen.at(-1)!.url.split('?')[0], '/api/path/.cat.dog');
+});
+
+test('#118 repeated path placeholders each receive the validated encoded value', async () => {
+  const repeated = await call('repeatedPath', { id: 'a/b' });
+  assert.equal(repeated.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/files/a%2Fb/related/a%2Fb');
+  const single = await call('getFile', { name: 'a/b' });
+  assert.equal(single.isError, undefined);
+  assert.equal(seen.at(-1)!.url.split('?')[0], '/api/files/a%2Fb/data');
 });
