@@ -63,6 +63,8 @@ spec2mcp <spec> [options]          # shorthand for generate
 | `-o, --out <dir>` | generate | Output directory; defaults to `./<name>-mcp`. Generation cleans/replaces that directory, including on a watch update. Do not keep hand edits there while regenerating. |
 | `--name <name>` | both | MCP server name; otherwise derived from the spec title. Also changes the prefix of generated auth and base-URL variable names. |
 | `--base-url <url>` | both | Override the first URL in the spec's root `servers` array. If neither is set, provide `<PREFIX>_BASE_URL` to the running server. |
+| `--env-prefix <prefix>` | both | Fixed prefix for generated auth and base-URL variable names, instead of deriving it from the spec title. Overlapping words collapse (`CLOUDFLARE_API` + `API_TOKEN` -> `CLOUDFLARE_API_TOKEN`). |
+| `--overlay <file>` | both | Repeatable: apply OpenAPI Overlay v1.0.0 files, in order, before generation. Each action targets nodes by JSONPath, deep-merges `update`, or removes the node with `remove: true`; an unmatched target fails the run. |
 | `--include <selector>` | both | Repeatable: generate or serve matching operations only. |
 | `--exclude <selector>` | both | Repeatable: omit matching operations, even if included. |
 | `--config <file>` | both | Read JSON settings from this file. Without the flag, use `./spec2mcp.config.json` if present. |
@@ -73,7 +75,7 @@ spec2mcp <spec> [options]          # shorthand for generate
 | `-h, --help` | both | Show CLI help. |
 | `-v, --version` | both | Show version. |
 
-`<spec>` is an OpenAPI 3.x JSON or YAML path/URL. The loader bundles external `$ref`s and synthesizes missing operation IDs. `--watch` is not supported by `serve`; URL watching polls the source, while local watching observes the file's parent directory. Regeneration occurs only if the source bytes changed (or a prior generation failed). External referenced documents are bundled when generation runs, but changing an external file alone does not trigger a local watch. The URL watcher fetches the source every interval, so use a rate appropriate to that host.
+`<spec>` is an OpenAPI 3.x or Swagger 2.0 JSON or YAML path/URL. Swagger 2.0 documents are converted to 3.x in memory at load (swagger2openapi, generation-time only), with `host`/`basePath`/`schemes` becoming the server URL and `securityDefinitions` becoming security schemes; 2.0 external `$ref`s relative to the spec's location are unsupported. The loader bundles external `$ref`s and synthesizes missing operation IDs. `--watch` is not supported by `serve`; URL watching polls the source, while local watching observes the file's parent directory. Regeneration occurs only if the source bytes changed (or a prior generation failed). External referenced documents are bundled when generation runs, but changing an external file alone does not trigger a local watch. The URL watcher fetches the source every interval, so use a rate appropriate to that host.
 
 Selectors are case-sensitive. `tag:catalog` matches an exact OpenAPI tag; `operation:list*` matches an `operationId` glob (`*` any sequence, `?` one character). An unprefixed selector matches either an exact tag or an operation ID glob. Includes are OR-ed, then excludes win. With no includes, all indexed operations are eligible:
 
@@ -87,12 +89,14 @@ A config file can hold reusable settings:
 {
   "name": "my-api",
   "baseUrl": "https://api.example.com/v1",
+  "envPrefix": "MYAPI",
+  "overlays": ["curate.yaml"],
   "include": ["tag:catalog"],
   "exclude": ["operation:delete*"]
 }
 ```
 
-Only `name`, `baseUrl`, `include`, and `exclude` are config keys. CLI flags override corresponding keys; repeated selectors on the CLI replace that key's config array rather than appending to it. `--out`, `--watch`, `--poll-interval`, `--transport`, and `--port` are flags, not config keys. `serve` reads config in the current working directory or via `--config`. A generated server reads its sibling `spec2mcp.config.json` at startup; changing its name/base URL or narrowing its *already generated* tools needs no regeneration. An operation excluded at generation does not exist in `operations.json` and cannot be restored by editing the generated config: regenerate from the spec. `<PREFIX>_BASE_URL` takes precedence over the config base URL at call time.
+Only `name`, `baseUrl`, `envPrefix`, `overlays`, `include`, and `exclude` are config keys. CLI flags override corresponding keys; repeated selectors on the CLI replace that key's config array rather than appending to it. `--out`, `--watch`, `--poll-interval`, `--transport`, and `--port` are flags, not config keys. `serve` reads config in the current working directory or via `--config`. A generated server reads its sibling `spec2mcp.config.json` at startup; changing its name/base URL or narrowing its *already generated* tools needs no regeneration. An operation excluded at generation does not exist in `operations.json` and cannot be restored by editing the generated config: regenerate from the spec. `<PREFIX>_BASE_URL` takes precedence over the config base URL at call time.
 
 ## Generated project
 
@@ -108,7 +112,7 @@ Only `name`, `baseUrl`, `include`, and `exclude` are config keys. CLI flags over
 
 Each indexed GET, POST, PUT, PATCH or DELETE operation becomes a tool with an MCP-safe name derived from its `operationId` (for example, `listPets` becomes `list_pets`; duplicate names get suffixes). Path, query, header and request-body fields become typed arguments, with required-field checks before making an HTTP request. JSON object body fields may appear as dotted arguments such as `address.street` and are rebuilt into an object for the API; array and free-form bodies use a single `body` argument. Nested required fields under an optional parent can be approximated. Multipart file arguments use `{ "contentBase64": "...", "filename": "...", "mimeType": "..." }`; only `contentBase64` is required. Non-JSON success bodies become image, audio, or embedded resource content according to MIME type.
 
-If a successful JSON response declares a usable schema, the tool may advertise an MCP `outputSchema` and return `structuredContent` alongside text. Top-level arrays/primitives are wrapped as `{ "result": ... }`. Schemas over 4,096 serialized bytes, absent schemas, and responses not parseable as matching JSON remain text-only; cyclic references are truncated when the schema is prepared. Text is limited to 50,000 characters by default (`SPEC2MCP_MAX_RESPONSE_CHARS`); binary payloads over 4 MiB are omitted with a notice (`SPEC2MCP_MAX_BINARY_BYTES`). These are process environment variables with positive integer byte/character limits. Non-2xx responses are tool errors with HTTP status and a bounded body. An empty success body is reported as text.
+If a successful JSON response declares a usable schema, the tool may advertise an MCP `outputSchema` and return `structuredContent` alongside text. Candidate structured content is validated against the advertised schema before attaching; a drifted response logs a warning and returns text-only, since MCP SDK clients hard-error results that fail the schema. Top-level arrays/primitives are wrapped as `{ "result": ... }`. Schemas over 4,096 serialized bytes, absent schemas, and responses not parseable as JSON remain text-only; cyclic references are truncated when the schema is prepared. Text is limited to 50,000 characters by default (`SPEC2MCP_MAX_RESPONSE_CHARS`); binary payloads over 4 MiB are omitted with a notice (`SPEC2MCP_MAX_BINARY_BYTES`). These are process environment variables with positive integer byte/character limits. Non-2xx responses are tool errors with HTTP status and a bounded body. An empty success body is reported as text.
 
 ## Authentication and environment
 
@@ -131,6 +135,7 @@ An operation's `security` takes priority over root `security`; `security: []` me
 | Input or behavior | Status |
 | --- | --- |
 | OpenAPI 3.0.x and 3.1.x JSON/YAML | Supported as input; 3.1 fixture covered by tests. Some 3.1 schema vocabulary may not translate exactly to MCP JSON Schema. |
+| Swagger/OpenAPI 2.0 | Converted to 3.x in memory at load; Kubernetes' full aggregated swagger.json (1,190 tools) is a pinned test. External `$ref`s relative to the 2.0 spec's location are unsupported. |
 | Local file and HTTP(S) spec URL; external `$ref` | Supported; external refs are bundled at generation/load time. |
 | GET, POST, PUT, PATCH, DELETE | Indexed by the pinned Forge resolver. |
 | HEAD, OPTIONS, TRACE | Not indexed by Forge and therefore not exposed as tools. |
@@ -139,9 +144,9 @@ An operation's `security` takes priority over root `security`; `security: []` me
 | Multipart forms, binary responses | Multipart form fields and base64 file inputs; binary response content maps to MCP media/resource types with size caps. |
 | Authentication | Environment-based HTTP bearer/basic, header/query API keys, pre-minted OAuth/OIDC bearer token; no token acquisition or refresh. |
 | stdio and Streamable HTTP | Supported; HTTP is loopback-only and has no MCP-client authentication. |
-| Large specs | GitHub REST (1,231 tools) and Cloudflare API (3,469 tools) were reported verified during project development. Client-side listing size/performance still depends on the MCP client. |
+| Large specs | GitHub REST (1,231 tools, live-called) and Cloudflare API (3,469 tools, ~9s) verified during development; Stripe, Kubernetes, Spotify and Vercel are pinned CI compat fixtures (612/236/96/431 tools, exact counts and tool shape asserted). Client-side listing size/performance still depends on the MCP client. |
 
-Additional Stripe, Kubernetes, Spotify and Vercel generation checks were reported in the project's validation matrix; counts, spec versions and call-level coverage are not recorded here, so do not assume every endpoint or security flow was exercised. Generated code is inspectable and should be reviewed before giving it credentials. Cloudflare [Code Mode](https://developers.cloudflare.com/agents/model-context-protocol/guides/build-codemode-openapi-mcp-server/) is another OpenAPI-to-MCP approach; spec2mcp's difference is the standalone project that you own and deploy.
+Live-call coverage beyond GitHub is not asserted, so do not assume every endpoint or security flow was exercised. Generated code is inspectable and should be reviewed before giving it credentials. Cloudflare [Code Mode](https://developers.cloudflare.com/agents/model-context-protocol/guides/build-codemode-openapi-mcp-server/) is another OpenAPI-to-MCP approach; spec2mcp's difference is the standalone project that you own and deploy.
 
 ## Develop
 
