@@ -145,6 +145,13 @@ test('#36 a field named __proto__ survives into the JSON body', async () => {
   assert.equal(sent.plain, 'y');
 });
 
+test('#59 a path param named body does not swallow the raw request body', async () => {
+  const res = await callTool('replace_thing', { body: 'widget-1', body_body: ['a', 'b'] });
+  assert.ok(!res.isError, res.content?.[0]?.text ?? 'tool call failed');
+  const req = seen.get('POST /things/widget-1')?.at(-1);
+  assert.equal(req?.body.toString('utf8'), JSON.stringify(['a', 'b']), 'raw array body sent under its disambiguated name');
+});
+
 test('#37 structuredContent honours SPEC2MCP_MAX_RESPONSE_CHARS', async () => {
   const res = await callTool('get_big', {});
   assert.equal(res.isError, true);
