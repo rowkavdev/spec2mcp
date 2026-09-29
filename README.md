@@ -7,199 +7,100 @@
 [![npm downloads/month](https://img.shields.io/npm/dm/spec2mcp)](https://www.npmjs.com/package/spec2mcp)
 [![yearly downloads](https://img.shields.io/npm/dy/spec2mcp)](https://www.npmjs.com/package/spec2mcp)
 
-spec2mcp turns any OpenAPI 3.x or Swagger 2.0 spec into a working MCP server with one command. Every operation in the spec becomes a tool that Claude, Cursor, or any other MCP client can call, with argument schemas, required-field checks, and auth pulled from the spec itself.
+spec2mcp turns an OpenAPI 3.x or Swagger 2.0 spec into an MCP server. Give it a JSON or YAML file or URL; it resolves the spec through [Cloudflare Forge](https://github.com/cloudflare/forge) and maps supported API operations to MCP tools. Generate a standalone Node project to run and edit yourself, or serve the spec directly. No hosted proxy is required.
 
-It is built as a transformer for [Forge](https://github.com/cloudflare/forge), the generation pipeline Cloudflare open-sourced for their `cf` CLI: the spec goes through Forge's resolver and plugin lifecycle, and spec2mcp's transformer emits the server.
+## Status
 
-## What you get
+Early development. The package name is `spec2mcp`; npm publication is in progress, so the npm badges and `npx` command below may not work until the first release. The generator currently indexes GET, POST, PUT, PATCH and DELETE operations. Review generated tools and auth warnings before using credentials. See [compatibility and limits](docs/guide.md#compatibility-and-limits).
 
-A standalone MCP server project that you own. Not a hosted proxy, not a SaaS: real files in a directory, runnable anywhere Node 22+ runs, editable like any other project.
+## Quickstart
 
-```bash
-npx spec2mcp generate openapi.json --out ./petstore-mcp
-cd petstore-mcp && npm install && npm start
-```
-
-To keep a generated project in sync while editing a local spec, run `spec2mcp generate openapi.json --out ./petstore-mcp --watch`. For a URL, `--watch` polls every 30 seconds by default; use `--poll-interval 60` to change that interval in seconds. Watch mode regenerates only when the spec content changes, retries failed generations, and prints errors to stderr while continuing to watch. It replaces the generated output directory on regeneration, so keep hand edits elsewhere. Stop with Ctrl+C. `serve` does not support `--watch`.
-
-Or skip the project and serve a spec directly over stdio:
+Once published (Node.js 22+):
 
 ```bash
-npx spec2mcp serve openapi.json
+npx spec2mcp generate ./openapi.yaml --out ./my-api-mcp
+cd my-api-mcp
+npm install
+# Set the credentials named in .env.example in your MCP client's environment.
+npm start
 ```
 
-Streamable HTTP is available in both modes, with SSE support and separate MCP sessions per client:
+Until publication, build from this repository and replace `npx spec2mcp` with `node /absolute/path/to/spec2mcp/dist/cli.mjs`:
 
 ```bash
-npx spec2mcp serve openapi.json --transport http --port 3000
-# or, inside a generated project:
-PORT=3000 npm run start:http
+npm ci && npm run build
+node dist/cli.mjs generate test/fixtures/petstore.yaml --out /tmp/petstore-mcp
 ```
 
-Point an MCP Streamable HTTP client at `http://127.0.0.1:3000/mcp`. The server listens only on loopback, validates Host and Origin, and has **no client authentication**. Do not expose it on a public network; API credentials in the server environment are shared across clients. The default transport remains stdio.
-
-Two lines in your Claude Desktop config and every endpoint in the spec is a tool:
+`npm start` speaks MCP over stdio, so start it from an MCP client, not as a text REPL. For example, add a generated server to Claude Desktop's MCP configuration:
 
 ```json
 {
   "mcpServers": {
-    "petstore": {
-      "command": "npx",
-      "args": ["-y", "spec2mcp", "serve", "/path/to/openapi.json"],
-      "env": { "PET_STORE_BEARER_AUTH": "your token" }
+    "my-api": {
+      "command": "node",
+      "args": ["/absolute/path/to/my-api-mcp/server.mjs"],
+      "env": { "MY_API_BEARER_AUTH": "your token" }
     }
   }
 }
 ```
 
-## How it works
+That env var is an example, not a fixed name. The generated `.env.example` lists the names for your spec; export them or set them in the MCP client. The server does not load `.env` automatically. If your spec lacks a server URL, set `<PREFIX>_BASE_URL` or pass `--base-url` when generating.
 
-```
-openapi.json ──► bundle external $refs ──► Forge resolver ──► spec2mcp transformer ──► MCP server project
-                     (json-schema-ref-parser)   (operations,     (operations.json        (server.mjs +
-                                                 parameters,      manifest)               one npm dep)
-                                                 bodies, types)
-```
-
-1. **Load.** File path or URL, JSON or YAML. External `$ref`s are bundled in. Missing `operationId`s are synthesised from method + path (`GET /pets/{petId}` becomes `get_pets_petid`), and duplicates are uniquified - no operation is silently dropped.
-2. **Resolve.** The spec goes through Forge's OpenAPI resolver, the same operation/parameter model behind Cloudflare's `cf` CLI (3,000+ operations). spec2mcp vendors Forge pinned to a commit because `@cloudflare/forge` is not on npm yet; the vendored copy is Apache-2.0 and swaps for the npm package when it ships.
-3. **Emit.** A Forge transformer writes the project: `operations.json` (the tool manifest), `server.mjs` (a generic runtime, identical for every spec), `package.json`, a README with a tool table, and a `.env.example` naming every credential the server expects.
-
-The generated server's only dependency is `@modelcontextprotocol/sdk`.
-
-## Tools and arguments
-
-- One MCP tool per operation, named from the `operationId` in MCP-safe snake_case (`listPets` -> `list_pets`).
-- Path, query and header parameters become typed tool arguments with descriptions, enums and defaults from the spec.
-- JSON request bodies are flattened into arguments per field (`address.street`) and reconstructed into the nested body on the call. Array and free-form bodies become a single `body` argument.
-- `multipart/form-data` bodies become one argument per form field, sent as a real multipart request. File fields take `{ "contentBase64": "...", "filename": "...", "mimeType": "..." }` (only `contentBase64` is required); object and array fields are JSON-serialised into their form field.
-- Non-JSON responses map to MCP content types: images come back as image content, audio as audio content, and other binary types (PDF, zip, octet-stream) as embedded blob resources. Text and JSON responses come back as text.
-- Large responses are capped so one call cannot flood the conversation: text is truncated at 50,000 characters and binary payloads at 4 MiB, each with a notice saying so. Override with `SPEC2MCP_MAX_RESPONSE_CHARS` and `SPEC2MCP_MAX_BINARY_BYTES`.
-- Non-2xx responses come back as tool errors with the status and response body; missing required arguments fail before any request is made.
-- Real specs reuse names across locations (Spotify has `uris` in both query and body; Kubernetes has a `{path}` template and a `path` query param). The later argument is renamed with its location (`uris_body`) and still sent on the wire under the API's own name.
-
-## Select tools and save project settings
-
-Use repeatable `--include` and `--exclude` selectors with either an exact OpenAPI tag (`tag:catalog`) or an operationId glob (`operation:list*`). An unprefixed selector matches either an exact tag or an operationId glob. `*` matches any sequence and `?` one character; matching is case-sensitive. Includes are combined with OR, and excludes take priority. With no includes, all operations are eligible.
+You can also run without creating a project, or use local Streamable HTTP:
 
 ```bash
-spec2mcp generate openapi.yaml --include 'tag:catalog' --exclude 'operation:delete*'
+npx spec2mcp serve ./openapi.yaml
+npx spec2mcp serve ./openapi.yaml --transport http --port 3000
+# In a generated project: PORT=3000 npm run start:http
 ```
 
-For reusable settings, put `spec2mcp.config.json` in the current directory (or pass `--config path/to/settings.json`):
+HTTP clients connect to `http://127.0.0.1:3000/mcp`. The endpoint is loopback-only and has **no MCP-client authentication**; do not expose it publicly or share a proxy to it. Clients use the API credentials in the server process. For flags, filters, watch mode, HTTP sessions, and configuration, see the [full guide](docs/guide.md).
 
-```json
-{
-  "name": "petstore",
-  "baseUrl": "https://api.example.com/v1",
-  "include": ["tag:catalog"],
-  "exclude": ["operation:delete*"]
-}
+## Why generate a project?
+
+OpenAPI-to-MCP is not new. Cloudflare's [Code Mode](https://developers.cloudflare.com/agents/model-context-protocol/guides/build-codemode-openapi-mcp-server/) is one approach, using a Cloudflare-hosted search/execute proxy. spec2mcp makes a different tradeoff: it writes `server.mjs`, `operations.json`, configuration, startup instructions and auth templates into a project you own. You can inspect the HTTP mapping, select tools, version the result, and run it wherever Node 22+ runs. The generated server depends only on `@modelcontextprotocol/sdk` at runtime. Forge is used during generation, not required by the generated project.
+
+```
+OpenAPI spec -> bundled $refs -> Forge resolver -> spec2mcp transformer -> standalone MCP project
 ```
 
-CLI flags override the corresponding config keys; repeat each flag to supply multiple selectors. Generation writes the effective settings to the generated project's `spec2mcp.config.json`. Its server reads that file at startup and can narrow its generated tools or override name and base URL without rebuilding. To expose additional operations, regenerate from the original spec. Environment `<PREFIX>_BASE_URL` still overrides the configured base URL at call time. `serve` reads the working directory's config too.
+Missing operation IDs are synthesized; tool names derive from operation IDs (`listPets` becomes `list_pets`). Path, query, header and JSON-body fields become arguments. Multipart uploads accept base64 file fields, and image/audio/binary responses map to MCP content types. Declared JSON success schemas can produce MCP `outputSchema` and `structuredContent`, validated against the schema before attaching so a drifted API response falls back to text-only instead of breaking the client; large or absent schemas stay text-only. Response caps keep large calls from overwhelming clients. [Tool behavior and limits](docs/guide.md#generated-project) has the details.
 
-## Curate tools with overlays
-
-Rename, re-describe or remove operations before generation with [OpenAPI Overlays](https://spec.openapis.org/overlay/latest.html) (v1.0.0). Pass `--overlay` per file, repeatable, applied in order after any earlier files:
+## Select operations and configure auth
 
 ```bash
-spec2mcp generate openapi.yaml --overlay curate.yaml --out ./my-mcp
+npx spec2mcp generate api.yaml --include 'tag:catalog' --exclude 'operation:delete*'
 ```
 
-```yaml
-overlay: 1.0.0
-info:
-  title: Curate the tools
-  version: 1.0.0
-actions:
-  - target: $.paths.*[?(@.operationId=='getPet')]
-    update:
-      operationId: fetchPet          # renames the tool to fetch_pet
-  - target: $.paths.*[?(@.operationId=='deletePet')]
-    remove: true                      # no tool is generated for it
-  - target: $.paths.*[?(@.operationId=='listPets')]
-    update:
-      description: List every pet currently in the store.
-```
+Selectors match exact tags or case-sensitive operation ID globs. `--include` and `--exclude` repeat; excludes win. The current directory's `spec2mcp.config.json` can hold `name`, `baseUrl`, `envPrefix`, `overlays`, `include`, and `exclude`, with CLI flags overriding each key.
 
-Each action's `target` is a JSONPath evaluated against the spec; `update` deep-merges into every matched node and `remove: true` deletes it. A target that matches nothing fails the run, so a stale operationId in your overlay is caught instead of silently ignored. Overlays apply before tool-name derivation and filtering, so renamed operations flow into tool names and `--include` selectors see the overlaid ids. Forge-specific `x-forge-commands` overlay keys are ignored - they belong to Forge's cf CLI pipeline, not MCP generation.
+To curate tools before generation, pass OpenAPI Overlay files with `--overlay` (repeatable, applied in order). Each action targets spec nodes by JSONPath, deep-merges an `update`, or deletes the node with `remove: true`; an unmatched target fails the run instead of being silently ignored. Renamed operations flow into tool names. Set a fixed auth env-var prefix with `--env-prefix` (overlapping words collapse: `CLOUDFLARE_API` + `API_TOKEN` becomes `CLOUDFLARE_API_TOKEN`). Generated projects save their effective settings and can narrow existing tools at startup; adding back tools excluded during generation requires regeneration. `--watch` regenerates when the source spec changes and **replaces the generated directory**, so keep hand edits elsewhere. [Configuration reference](docs/guide.md#cli-reference).
 
-## Auth
+Auth comes from the spec's security schemes. The generated `.env.example` names each needed variable, such as `PET_STORE_BEARER_AUTH` for a `Pet Store` bearer scheme. HTTP bearer/basic, header/query API keys, and pre-minted OAuth/OIDC bearer tokens are mapped; the server does not perform OAuth login or refresh. An unset variable means the request proceeds without it, possibly returning a 401. [Auth mapping and security caveats](docs/guide.md#authentication-and-environment).
 
-Auth comes from the spec's `securitySchemes`; the server reads secrets from environment variables at call time. Nothing secret is ever written into generated files.
+## Verified APIs
 
-| Scheme | Behaviour |
-| --- | --- |
-| HTTP bearer | `Authorization: Bearer $ENV_VAR` |
-| HTTP basic | `$ENV_VAR` holds `user:password`, sent as Basic |
-| apiKey (header or query) | `$ENV_VAR` sent as the named header/query param |
-| OAuth2 / OIDC | treat the env var as a pre-minted bearer token |
+| API spec | Result | Verification scope |
+| --- | --- | --- |
+| GitHub REST | 1,231 generated tools | Project installed; MCP stdio client invoked `repos_get` against live `api.github.com`. Reproduce with `node examples/live-github.mjs`. |
+| Cloudflare API | 3,469 generated tools | Generation from its public spec (2,185 paths, about 26 MB); `api_token` bearer scheme mapped. |
+| Stripe, Kubernetes (core/v1), Spotify, Vercel | 612 / 236 / 96 / 431 tools | Pinned snapshots verified in CI by the compat matrix (`test/compat.test.ts`), including tool shape and full project emission. Refresh from live sources with `npm run compat:refresh`. |
+| Kubernetes aggregated Swagger 2.0 | 1,190 tools | 2.0 spec converted to 3.x in memory at load; pinned fixture test. |
+| Discord | 246 tools | Generation from the official spec; bot token and OAuth2 schemes mapped. |
 
-Each tool uses its operation-level `security` when present, otherwise the root requirement. An explicit `security: []` sends no credentials. The first fully mapped OR alternative is selected when available (its schemes are combined as AND); a missing or unsupported scheme produces a generation-time warning and uses the sole supported scheme as a fallback if one exists, otherwise continues without that scheme.
-
-Env var names are derived from the API title and scheme name, e.g. `PET_STORE_BEARER_AUTH`. When the title's suffix already matches the scheme name, the overlap is collapsed (`CLOUDFLARE_API` + `API_TOKEN` becomes `CLOUDFLARE_API_TOKEN`). Set a fixed prefix with `--env-prefix MYAPI` (or `"envPrefix"` in config) for stable names regardless of the spec's title. The generated `.env.example` lists them all. `<PREFIX>_BASE_URL` overrides the spec's server URL, so one generated server can point at staging or prod without regenerating.
-
-## vs Cloudflare Code Mode
-
-Cloudflare's own [Code Mode](https://developers.cloudflare.com/agents/model-context-protocol/guides/build-codemode-openapi-mcp-server/) (`openApiMcpServer()`) exposes an API through a hosted search/execute proxy running on Cloudflare. spec2mcp is the other shape: it generates a standalone server project from the spec - a file tree you own, run where you want, and check into git. No hosted dependency. The two complement each other, which is also why this transformer fits Forge's plugin model.
-
-## Scale and verified APIs
-
-Verified against two of the biggest public specs (run `node examples/live-github.mjs` to reproduce the second):
-
-- **GitHub's official REST API spec** - 1,231 tools generated; the example then npm-installs the project, connects the official MCP client over stdio, and calls `repos_get` against live api.github.com.
-- **Cloudflare's own public API spec** (2,185 paths, ~26 MB) - 3,469 tools generated in about 9 seconds, with the `api_token` bearer scheme mapped to an env var.
-
-CI also runs a compat matrix over pinned snapshots of four large public APIs, verifying generation, exact tool counts and tool shape (`test/compat.test.ts`). Snapshots live in `test/fixtures/compat/` and are refreshed from the live sources with `npm run compat:refresh`.
-
-| API | OpenAPI | Tools | Notes |
-| --- | --- | --- | --- |
-| [Stripe](https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json) | 3.0.0 | 612 | Basic-auth scheme maps to `STRIPE_API_BASIC_AUTH` |
-| [Kubernetes (core/v1)](https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/v3/api__v1_openapi.json) | 3.0.0 | 236 | No server URL in the spec - set `KUBERNETES_BASE_URL` |
-| [Spotify Web API](https://developer.spotify.com/reference/web-api/open-api-schema.yaml) | 3.0.3 | 96 | References an external file (`../policies.yaml`), bundled at load |
-| [Vercel](https://openapi.vercel.sh/) | 3.0.3 | 431 | Auth is declared per-operation; each tool picks up its operation-level schemes |
-
-## OpenAPI 3.1
-
-3.1 specs work: JSON Schema 2020-12 type unions (`type: ["string", "null"]`) are collapsed to a single type at load, a multi-type union becomes an `anyOf` the resolver understands, and a webhook-only document (no `paths`) is valid input. Two 3.1-specific fields are handled explicitly:
-
-- **`webhooks`** - a webhook is an event the API sends to *your* server, so webhooks are never tools. They are recorded in `operations.json` and listed in the generated README instead of being silently dropped.
-- **`jsonSchemaDialect`** - recorded in `operations.json`; a non-default dialect is flagged in the generated README and CLI output, since tool argument schemas are approximated as standard JSON Schema.
-
-## Swagger 2.0
-
-Specs still on Swagger/OpenAPI 2.0 (Slack's web API, Kubernetes' aggregated `swagger.json`, and many older enterprise APIs) are converted to 3.x in memory at load, then run through the same pipeline: `host`/`basePath`/`schemes` become the server URL, `securityDefinitions` become security schemes (basic auth converts to HTTP basic), and operations without `operationId` get synthesised tool names. Conversion uses [swagger2openapi](https://github.com/Mermade/oas-kit) at generation time only - generated projects keep their single runtime dependency. Kubernetes' full aggregated 2.0 spec (1,190 operations) is covered by a pinned test.
-
-## Current limitations
-
-Honest list, all roadmap items:
-
-- Multi-type unions (`type: [string, integer]`) degrade to a string argument; single-type-plus-null collapses cleanly
-- Nested-body `required` flags are approximated when an intermediate object is optional
-- Raw `application/octet-stream` request bodies pass through as a raw `body` string argument (multipart uploads are handled per field)
-- Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
-- `head`/`options`/`trace` operations are not exposed (Forge limitation)
-- Overlay actions support `target` + `update`/`remove` only (the curation subset of the Overlay spec)
-- Swagger 2.0 inputs with external `$ref`s relative to the spec's own location are unsupported (the converted document exists only in memory)
-
-## Roadmap
-
-- Support configurable choices between multiple security OR alternatives
-- Upstream the transformer to [cloudflare/forge](https://github.com/cloudflare/forge) as their MCP target
-- Publish to npm (the badges above go live with the first release)
+Those counts reflect the specs tested, not a guarantee that all later versions generate identical tools or that every endpoint was called. OpenAPI 3.1 input is covered by a fixture, but webhooks are not inbound MCP tools and some 3.1 schema features may not translate exactly. Swagger 2.0 inputs convert at load; 2.0 specs with external `$ref`s relative to the spec's own location are unsupported (the converted document exists only in memory). [Compatibility table](docs/guide.md#compatibility-and-limits).
 
 ## Development
 
 ```bash
-npm install
-npm run typecheck   # strict tsc over src + vendored forge
-npm run build       # esbuild bundle -> dist/cli.mjs
-npm test            # node:test unit + e2e (drives MCP sessions over stdio and HTTP)
+npm ci
+npm run typecheck
+npm run build
+npm test
 ```
 
-Layout: `src/` (CLI, loader, manifest builder, transformer), `runtime/server.mjs` (the file copied into generated projects), `vendor/forge/` (pinned `@cloudflare/forge`, see its PINNED.md), `test/` (fixture specs + an e2e test that boots a generated server against a mock API).
+`src/` holds the generator, `runtime/server.mjs` is copied into generated projects, `test/` covers manifests and MCP sessions, and `vendor/forge/` contains the pinned Forge source. [Full guide](docs/guide.md) · [Forge pin](vendor/forge/PINNED.md).
 
-## License
-
-MIT. Vendored Forge code is Apache-2.0, copyright Cloudflare, Inc. (see `vendor/forge/LICENSE`).
+MIT licensed. Vendored Forge code is Apache-2.0, copyright Cloudflare, Inc.; see `vendor/forge/LICENSE`.
