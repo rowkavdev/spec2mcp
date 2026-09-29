@@ -21,6 +21,9 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/** Raised when a tool argument cannot be encoded into the request body. */
+class ToolArgumentError extends Error {}
+
 function textResult(text) {
   return { content: [{ type: 'text', text }] };
 }
@@ -39,6 +42,54 @@ function setNested(target, fieldPath, value) {
   }
   cursor[fieldPath[fieldPath.length - 1]] = value;
   return target;
+}
+
+const BASE64_RE = /^[A-Za-z0-9+/=\s]*$/;
+
+/**
+ * Validate a binary multipart argument ({ contentBase64, filename?,
+ * mimeType? }) and decode it into bytes ready for a FormData file part.
+ */
+function filePart(arg, value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ToolArgumentError(
+      `Argument "${arg.name}" is a file upload: pass an object with a contentBase64 property (base64-encoded file content), plus optional filename and mimeType.`,
+    );
+  }
+  const contentBase64 = value.contentBase64;
+  if (typeof contentBase64 !== 'string' || contentBase64.length === 0 || !BASE64_RE.test(contentBase64)) {
+    throw new ToolArgumentError(`Argument "${arg.name}": contentBase64 must be a non-empty base64 string.`);
+  }
+  const bytes = Buffer.from(contentBase64, 'base64');
+  const filename = typeof value.filename === 'string' && value.filename.length > 0 ? value.filename : arg.name;
+  const mimeType = typeof value.mimeType === 'string' && value.mimeType.length > 0 ? value.mimeType : 'application/octet-stream';
+  return { bytes, filename, mimeType };
+}
+
+/**
+ * Encode body arguments as a real multipart/form-data payload. Binary args
+ * become file parts; object/array args are JSON-serialised into their form
+ * field; everything else is stringified. Returns undefined when no body
+ * argument was supplied, so optional-field forms send no body at all.
+ */
+function buildFormBody(tool, args) {
+  const form = new FormData();
+  let parts = 0;
+  for (const arg of tool.args) {
+    if (arg.location !== 'body') continue;
+    const value = args[arg.name];
+    if (value === undefined) continue;
+    if (arg.binary) {
+      const part = filePart(arg, value);
+      form.append(arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
+    } else if (typeof value === 'object' && value !== null) {
+      form.append(arg.name, JSON.stringify(value));
+    } else {
+      form.append(arg.name, String(value));
+    }
+    parts++;
+  }
+  return parts > 0 ? form : undefined;
 }
 
 /** Apply the manifest's auth schemes. Missing env vars are skipped, not
@@ -118,7 +169,14 @@ async function executeTool(manifest, tool, args) {
 
   let body;
   if (tool.args.some((a) => a.location === 'body')) {
-    if (tool.requestBodyIsArray || tool.args.length === 1) {
+    if (tool.contentType === 'multipart/form-data') {
+      try {
+        body = buildFormBody(tool, args);
+      } catch (err) {
+        if (err instanceof ToolArgumentError) return errorResult(err.message);
+        throw err;
+      }
+    } else if (tool.requestBodyIsArray || tool.args.length === 1) {
       const raw = args.body;
       body = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {});
     } else {
@@ -131,7 +189,10 @@ async function executeTool(manifest, tool, args) {
       }
       body = JSON.stringify(obj);
     }
-    headers.set('content-type', tool.contentType ?? 'application/json');
+    // FormData sets its own content-type with the multipart boundary.
+    if (body !== undefined && !(body instanceof FormData)) {
+      headers.set('content-type', tool.contentType ?? 'application/json');
+    }
   }
 
   let res;
