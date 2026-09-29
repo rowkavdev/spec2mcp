@@ -153,7 +153,10 @@ export function ensureOperationIds(doc: OpenAPIV3.Document): void {
     for (const method of HTTP_METHODS) {
       const op = (pathItem as Record<string, unknown>)[method] as OpenAPIV3.OperationObject | undefined;
       if (!op || typeof op !== 'object') continue;
-      let id = typeof op.operationId === 'string' && op.operationId.length > 0 ? op.operationId : synthesizeId(method, path);
+      // Forge strips apostrophes from its operation index keys. Repair against
+      // that same key so distinct source IDs cannot collide at init.
+      let id = (typeof op.operationId === 'string' && op.operationId.length > 0 ? op.operationId : synthesizeId(method, path)).replace(/'/g, '');
+      if (!id) id = synthesizeId(method, path);
       if (seen.has(id)) {
         let i = 2;
         while (seen.has(`${id}_${i}`)) i++;

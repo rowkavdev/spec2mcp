@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { init } from '../vendor/forge/index.js';
 import { applyOverlays } from './overlay.js';
-import { loadOverlays, loadSpec } from './load.js';
+import { ensureOperationIds, loadOverlays, loadSpec } from './load.js';
 import type { OpenAPIV3 } from 'openapi-types';
 import { buildManifest, DEFAULT_31_DIALECT } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
@@ -64,7 +64,12 @@ async function runtimeSource(): Promise<string> {
 async function loadEffectiveSpec(spec: string, overlayPaths: string[]): Promise<OpenAPIV3.Document> {
   let doc = await loadSpec(spec);
   const overlays = await loadOverlays(overlayPaths);
-  if (overlays.length > 0) doc = applyOverlays(doc, overlays);
+  if (overlays.length > 0) {
+    doc = applyOverlays(doc, overlays);
+    // Overlay updates can reintroduce operation IDs that collide after
+    // Forge's apostrophe normalization.
+    ensureOperationIds(doc);
+  }
   return doc;
 }
 
