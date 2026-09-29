@@ -141,6 +141,8 @@ test('AND schemes combine, and a valid OR alternative wins over an unresolved on
   assert.deepEqual(m.tools.find((t) => t.name === 'list_pets')?.authSchemeNames, ['bearerAuth', 'apiKeyQuery']);
   assert.deepEqual(m.tools.find((t) => t.name === 'create_pet')?.authSchemeNames, ['apiKeyQuery']);
   assert.deepEqual(m.auth.warnings, []);
+});
+
 test('operations with a declared JSON response schema get an MCP outputSchema', async () => {
   const doc = await loadSpec(PETSTORE);
   await init(doc);
