@@ -8,10 +8,12 @@ import type { OpenAPIV3 } from 'openapi-types';
 import type { TransformerFn } from '../vendor/forge/index.js';
 import { buildManifest, type Manifest, type ManifestOptions } from './manifest.js';
 import { toKebab } from './naming.js';
+import { CONFIG_FILE, type ProjectConfig } from './config.js';
 
 export type McpTransformerOptions = ManifestOptions & {
   /** Verbatim contents of runtime/server.mjs, supplied by the CLI. */
   runtimeSource: string;
+  projectConfig?: ProjectConfig;
 };
 
 function generatedPackageJson(manifest: Manifest): string {
@@ -84,6 +86,8 @@ function generatedReadme(manifest: Manifest): string {
   lines.push('}');
   lines.push('```');
   lines.push('');
+  lines.push('Settings are saved in `spec2mcp.config.json`. The server reads the name, base URL and filters at startup. To add back operations excluded at generation, regenerate the project.');
+  lines.push('');
   lines.push('## Tools');
   lines.push('');
   lines.push('| Tool | HTTP | Description |');
@@ -116,6 +120,7 @@ export function createMcpTransformer(doc: OpenAPIV3.Document, opts: McpTransform
   return async (forge) => {
     const manifest = buildManifest(doc, opts);
     forge.emit('operations.json', JSON.stringify(manifest, null, 2) + '\n');
+    forge.emit(CONFIG_FILE, JSON.stringify(opts.projectConfig ?? { name: manifest.serverName, baseUrl: manifest.baseUrl, include: opts.include ?? [], exclude: opts.exclude ?? [] }, null, 2) + '\n');
     forge.emit('server.mjs', opts.runtimeSource);
     forge.emit('package.json', generatedPackageJson(manifest));
     forge.emit('README.md', generatedReadme(manifest));

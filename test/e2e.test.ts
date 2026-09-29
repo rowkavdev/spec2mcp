@@ -195,4 +195,39 @@ test('tools/call without an outputSchema stays text-only', async () => {
   assert.equal(result.structuredContent, undefined);
   const content = result.content as { type: string; text: string }[];
   assert.match(content[0]!.text, /"ok": true/);
+test('generated runtime reads project config to narrow tools and override server name/base URL', async () => {
+  child.kill('SIGKILL');
+  await writeFile(join(OUT, 'spec2mcp.config.json'), JSON.stringify({
+    name: 'petstore-curated', baseUrl: apiBase, include: ['operation:getPet'], exclude: [],
+  }));
+  child = spawn(process.execPath, [join(OUT, 'server.mjs')], {
+    env: { ...process.env, PET_STORE_BEARER_AUTH: 'test-token-123' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  buffer = '';
+  child.stdout!.on('data', (chunk) => {
+    buffer += chunk.toString();
+    let idx: number;
+    while ((idx = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      if (msg.id !== undefined && pending.has(msg.id)) {
+        pending.get(msg.id)!(msg);
+        pending.delete(msg.id);
+      }
+    }
+  });
+  child.stderr!.on('data', () => {});
+  const initRes = await rpc('initialize', {
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'config-e2e', version: '0.0.0' },
+  });
+  assert.equal((initRes.result as { serverInfo: { name: string } }).serverInfo.name, 'petstore-curated');
+  child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+  const listed = await rpc('tools/list');
+  assert.deepEqual(((listed.result as { tools: { name: string }[] }).tools).map((tool) => tool.name), ['get_pet']);
+  seen.length = 0;
+  await rpc('tools/call', { name: 'get_pet', arguments: { petId: 9 } });
+  assert.equal(seen[0]?.url, '/v1/pets/9');
 });
