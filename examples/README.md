@@ -47,7 +47,12 @@ node node_modules/tsx/dist/cli.mjs src/cli.ts generate \
   --out examples/<name>
 ```
 
-(Or `spec2mcp generate ...` from an installed CLI.) `test/examples.test.ts`
+(Or `spec2mcp generate ...` from an installed CLI.)
+
+`generate --out` replaces the output directory, so the committed input
+`openapi.yaml` is deleted along with the stale output. Restore it before
+committing (`git checkout -- examples/<name>/openapi.yaml`), or generate
+into a scratch directory and copy the generated files back. `test/examples.test.ts`
 runs exactly this and diffs the result, so the examples always match the
 current generator - regenerate and commit them whenever generator output
 changes on purpose.
