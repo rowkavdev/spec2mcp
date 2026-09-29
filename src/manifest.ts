@@ -20,6 +20,13 @@ import { operationIncluded, operationTags, type OperationFilters } from './filte
 export type ToolArg = {
   /** Tool argument name (dotted for nested body fields, e.g. "origin.host"). */
   name: string;
+  /**
+   * The API's own parameter name, set when the tool-facing name had to be
+   * disambiguated (e.g. a query param and a body field both named "uris").
+   * Path/query/header params go on the wire under this name; omit when
+   * identical to `name`.
+   */
+  apiName?: string;
   location: 'path' | 'query' | 'header' | 'body';
   /** For body args: path of API field names for nested body reconstruction. */
   apiFieldPath?: string[];
@@ -133,6 +140,30 @@ function argSchema(p: ParameterInfo): Record<string, unknown> {
   if (p.default !== undefined) schema.default = p.default;
   if (p.description) schema.description = p.description;
   return schema;
+}
+
+/**
+ * Real specs reuse one name across locations (Kubernetes has a path template
+ * {path} plus a query param "path"; Spotify has "uris" in query and body).
+ * The input schema keys args by name, so a collision would silently drop one
+ * argument. Keep the first occurrence bare and suffix later ones with their
+ * location ("uris_body"), preserving the API's wire name in apiName.
+ */
+function disambiguateArgNames(args: ToolArg[]): void {
+  const taken = new Set<string>();
+  for (const a of args) {
+    if (!taken.has(a.name)) {
+      taken.add(a.name);
+      continue;
+    }
+    const original = a.name;
+    let candidate = `${original}_${a.location}`;
+    let i = 2;
+    while (taken.has(candidate)) candidate = `${original}_${a.location}_${i++}`;
+    a.name = candidate;
+    if (a.location !== 'body') a.apiName = original;
+    taken.add(candidate);
+  }
 }
 
 function pickContentType(contentTypes: string[]): string | undefined {
@@ -380,6 +411,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         schema: { description: op.requestBodyDescription ?? 'Raw request body.' },
       });
     }
+
+    disambiguateArgNames(args);
 
     const properties: Record<string, unknown> = {};
     const requiredArgs: string[] = [];

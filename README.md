@@ -76,6 +76,7 @@ The generated server's only dependency is `@modelcontextprotocol/sdk`.
 - Non-JSON responses map to MCP content types: images come back as image content, audio as audio content, and other binary types (PDF, zip, octet-stream) as embedded blob resources. Text and JSON responses come back as text.
 - Large responses are capped so one call cannot flood the conversation: text is truncated at 50,000 characters and binary payloads at 4 MiB, each with a notice saying so. Override with `SPEC2MCP_MAX_RESPONSE_CHARS` and `SPEC2MCP_MAX_BINARY_BYTES`.
 - Non-2xx responses come back as tool errors with the status and response body; missing required arguments fail before any request is made.
+- Real specs reuse names across locations (Spotify has `uris` in both query and body; Kubernetes has a `{path}` template and a `path` query param). The later argument is renamed with its location (`uris_body`) and still sent on the wire under the API's own name.
 
 ## Select tools and save project settings
 

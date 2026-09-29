@@ -1,0 +1,37 @@
+{
+  "refreshed": "2026-09-29",
+  "specs": [
+    {
+      "id": "stripe",
+      "title": "Stripe API",
+      "file": "stripe.json",
+      "url": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+      "openapi": "3.0.0",
+      "tools": 612
+    },
+    {
+      "id": "kubernetes",
+      "title": "Kubernetes",
+      "file": "kubernetes.json",
+      "url": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/v3/api__v1_openapi.json",
+      "openapi": "3.0.0",
+      "tools": 236
+    },
+    {
+      "id": "spotify",
+      "title": "Spotify Web API",
+      "file": "spotify/open-api-schema.yaml",
+      "url": "https://developer.spotify.com/reference/web-api/open-api-schema.yaml",
+      "openapi": "3.0.3",
+      "tools": 96
+    },
+    {
+      "id": "vercel",
+      "title": "Vercel API",
+      "file": "vercel.json",
+      "url": "https://openapi.vercel.sh/",
+      "openapi": "3.0.3",
+      "tools": 431
+    }
+  ]
+}
