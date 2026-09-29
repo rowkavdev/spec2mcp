@@ -1,0 +1,4 @@
+{
+  "name": "pet-store",
+  "baseUrl": "https://api.petstore.example/v1"
+}
