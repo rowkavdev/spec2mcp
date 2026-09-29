@@ -148,10 +148,12 @@ async function executeTool(manifest, tool, args) {
 
   const text = await res.text();
   let rendered = text;
+  let parsed;
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('json') && text.length > 0) {
     try {
-      rendered = JSON.stringify(JSON.parse(text), null, 2);
+      parsed = JSON.parse(text);
+      rendered = JSON.stringify(parsed, null, 2);
     } catch {
       rendered = text;
     }
@@ -159,7 +161,21 @@ async function executeTool(manifest, tool, args) {
   if (!res.ok) {
     return errorResult(`HTTP ${res.status} ${res.statusText}\n${rendered}`.trim());
   }
-  return textResult(rendered.length > 0 ? rendered : `(empty response, HTTP ${res.status})`);
+  const result = textResult(rendered.length > 0 ? rendered : `(empty response, HTTP ${res.status})`);
+  // Tools with a manifest outputSchema also return structuredContent (MCP
+  // spec). The text content stays for clients without structured support.
+  // Degrade silently to text-only when the body didn't parse as JSON or the
+  // API returned a shape the schema can't hold.
+  if (tool.outputSchema && parsed !== undefined) {
+    let structured;
+    if (tool.outputWrap) {
+      structured = { result: parsed ?? null };
+    } else if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      structured = parsed;
+    }
+    if (structured) result.structuredContent = structured;
+  }
+  return result;
 }
 
 function createMcpServer(manifest) {
@@ -175,6 +191,7 @@ function createMcpServer(manifest) {
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
+      ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
     })),
   }));
 
