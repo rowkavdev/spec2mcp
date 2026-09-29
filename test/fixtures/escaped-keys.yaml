@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Escaped Keys API
+  version: 1.0.0
+servers:
+  - url: https://escaped.example.com
+paths:
+  /pets:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/pet~1variant'
+components:
+  schemas:
+    pet/variant:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
