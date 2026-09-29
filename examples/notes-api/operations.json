@@ -1,0 +1,253 @@
+{
+  "generator": "spec2mcp",
+  "apiTitle": "Notes API",
+  "apiVersion": "1.0.0",
+  "serverName": "notes-api",
+  "baseUrl": "https://api.notes.example/v1",
+  "auth": {
+    "schemes": [
+      {
+        "kind": "bearer",
+        "schemeName": "bearerAuth",
+        "envVar": "NOTES_API_BEARER_AUTH"
+      }
+    ],
+    "warnings": [],
+    "baseUrlEnvVar": "NOTES_API_BASE_URL"
+  },
+  "tools": [
+    {
+      "name": "list_notes",
+      "description": "GET /notes",
+      "operationId": "listNotes",
+      "tags": [],
+      "method": "GET",
+      "path": "/notes",
+      "args": [
+        {
+          "name": "q",
+          "location": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Full-text search over note titles and bodies"
+          }
+        }
+      ],
+      "authSchemeNames": [
+        "bearerAuth"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Full-text search over note titles and bodies"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "outputWrap": true,
+      "responseContentTypes": [
+        "application/json"
+      ]
+    },
+    {
+      "name": "create_note",
+      "description": "POST /notes",
+      "operationId": "createNote",
+      "tags": [],
+      "method": "POST",
+      "path": "/notes",
+      "args": [
+        {
+          "name": "title",
+          "location": "body",
+          "apiFieldPath": [
+            "title"
+          ],
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The note's title"
+          }
+        },
+        {
+          "name": "body",
+          "location": "body",
+          "apiFieldPath": [
+            "body"
+          ],
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "The note's contents"
+          }
+        }
+      ],
+      "authSchemeNames": [
+        "bearerAuth"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "The note's title"
+          },
+          "body": {
+            "type": "string",
+            "description": "The note's contents"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "contentType": "application/json",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      },
+      "responseContentTypes": [
+        "application/json"
+      ]
+    },
+    {
+      "name": "get_note",
+      "description": "GET /notes/{noteId}",
+      "operationId": "getNote",
+      "tags": [],
+      "method": "GET",
+      "path": "/notes/{noteId}",
+      "args": [
+        {
+          "name": "noteId",
+          "location": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "ID of the note"
+          }
+        }
+      ],
+      "authSchemeNames": [
+        "bearerAuth"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "ID of the note"
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      },
+      "responseContentTypes": [
+        "application/json"
+      ]
+    },
+    {
+      "name": "delete_note",
+      "description": "DELETE /notes/{noteId}",
+      "operationId": "deleteNote",
+      "tags": [],
+      "method": "DELETE",
+      "path": "/notes/{noteId}",
+      "args": [
+        {
+          "name": "noteId",
+          "location": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "ID of the note"
+          }
+        }
+      ],
+      "authSchemeNames": [
+        "bearerAuth"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "ID of the note"
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
