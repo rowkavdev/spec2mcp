@@ -280,7 +280,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
   applyAuth(manifest, tool, url, headers);
 
   let body;
-  if (tool.args.some((a) => a.location === 'body')) {
+  const bodyArgs = tool.args.filter((a) => a.location === 'body');
+  if (bodyArgs.length > 0 && bodyArgs.some((a) => args[a.name] !== undefined)) {
     if (tool.contentType === 'multipart/form-data') {
       try {
         body = buildFormBody(tool, args);
@@ -290,8 +291,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
       }
     } else if (
       tool.requestBodyIsArray ||
-      (tool.args.filter((a) => a.location === 'body').length === 1 &&
-        tool.args.some((a) => a.location === 'body' && a.name === 'body' && (!a.apiFieldPath || a.apiFieldPath.length === 0)))
+      (bodyArgs.length === 1 && bodyArgs[0].name === 'body' &&
+        (!bodyArgs[0].apiFieldPath || bodyArgs[0].apiFieldPath.length === 0))
     ) {
       const raw = args.body;
       if (tool.contentType && !isTextLikeType(baseContentType(tool.contentType))) {
@@ -302,12 +303,11 @@ async function executeTool(manifest, tool, args, validateOutput) {
           throw err;
         }
       } else {
-        body = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {});
+        body = typeof raw === 'string' ? raw : JSON.stringify(raw);
       }
     } else {
       const obj = {};
-      for (const arg of tool.args) {
-        if (arg.location !== 'body') continue;
+      for (const arg of bodyArgs) {
         const value = args[arg.name];
         if (value === undefined) continue;
         if (arg.apiFieldPath && arg.apiFieldPath.length > 0) setNested(obj, arg.apiFieldPath, value);
