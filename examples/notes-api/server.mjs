@@ -344,7 +344,13 @@ function compileOutputValidator(schema) {
 export { compileOutputValidator };
 
 async function executeTool(manifest, tool, args, validateOutput) {
-  const missing = tool.args.filter((a) => a.required && args[a.name] === undefined).map((a) => a.name);
+  // A required parent is covered by a provided leaf (pet.id covers pet)
+  // and required leaves are covered by a provided parent (pet covers
+  // pet.id): the nullable parent arg coexists with its flattened leaves
+  // (#120), and either route puts the parent on the wire.
+  const provided = Object.keys(args).filter((k) => args[k] !== undefined);
+  const covered = (name) => provided.some((p) => p === name || p.startsWith(`${name}.`) || name.startsWith(`${p}.`));
+  const missing = tool.args.filter((a) => a.required && !covered(a.name)).map((a) => a.name);
   if (missing.length > 0) {
     return errorResult(`Missing required argument(s): ${missing.join(', ')}`);
   }
