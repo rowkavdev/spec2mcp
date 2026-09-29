@@ -290,30 +290,36 @@ async function executeTool(manifest, tool, args, validateOutput) {
         if (err instanceof ToolArgumentError) return errorResult(err.message);
         throw err;
       }
-    } else if (
-      tool.requestBodyIsArray ||
-      (bodyArgs.length === 1 && bodyArgs[0].name === 'body' &&
-        (!bodyArgs[0].apiFieldPath || bodyArgs[0].apiFieldPath.length === 0))
-    ) {
-      const raw = args.body;
-      if (tool.contentType && !isTextLikeType(baseContentType(tool.contentType))) {
-        try {
-          body = binaryBody(raw);
-        } catch (err) {
-          if (err instanceof ToolArgumentError) return errorResult(err.message);
-          throw err;
+    } else {
+      // A raw body is identified by shape, never by name: it is the single
+      // body arg with no field path. Its input name may have been
+      // disambiguated (a path/query param literally named "body" renames the
+      // raw arg to body_body), so matching name === 'body' here would send {}.
+      const rawArg =
+        bodyArgs.length === 1 && (!bodyArgs[0].apiFieldPath || bodyArgs[0].apiFieldPath.length === 0)
+          ? bodyArgs[0]
+          : undefined;
+      if (rawArg) {
+        const raw = args[rawArg.name];
+        if (tool.contentType && !isTextLikeType(baseContentType(tool.contentType))) {
+          try {
+            body = binaryBody(raw);
+          } catch (err) {
+            if (err instanceof ToolArgumentError) return errorResult(err.message);
+            throw err;
+          }
+        } else {
+          body = typeof raw === 'string' ? raw : JSON.stringify(raw);
         }
       } else {
-        body = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        const obj = {};
+        for (const arg of bodyArgs) {
+          const value = args[arg.name];
+          if (value === undefined) continue;
+          if (arg.apiFieldPath && arg.apiFieldPath.length > 0) setNested(obj, arg.apiFieldPath, value);
+        }
+        body = JSON.stringify(obj);
       }
-    } else {
-      const obj = {};
-      for (const arg of bodyArgs) {
-        const value = args[arg.name];
-        if (value === undefined) continue;
-        if (arg.apiFieldPath && arg.apiFieldPath.length > 0) setNested(obj, arg.apiFieldPath, value);
-      }
-      body = JSON.stringify(obj);
     }
     // FormData sets its own content-type with the multipart boundary.
     if (body !== undefined && !(body instanceof FormData)) {
