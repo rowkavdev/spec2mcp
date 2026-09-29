@@ -448,7 +448,11 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         location: 'body',
         apiFieldPath: [],
         required: bodyRequired,
-        schema: { description: op.requestBodyDescription ?? 'Raw request body.' },
+        schema: contentType === 'application/x-www-form-urlencoded'
+          ? { type: 'object', description: op.requestBodyDescription ?? 'Form fields (arrays repeat the field name).' }
+          : contentType && (contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml'))
+            ? { type: 'string', description: op.requestBodyDescription ?? 'Pre-serialized XML request body.' }
+            : { description: op.requestBodyDescription ?? 'Raw request body.' },
       });
     }
 

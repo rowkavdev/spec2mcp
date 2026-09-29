@@ -60,6 +60,8 @@ before(async () => {
       tool('optional', 'POST', [{ name: 'name', location: 'body', apiFieldPath: ['name'], required: false, schema: { type: 'string' } }], 'application/json'),
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
+      tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
+      tool('xml', 'POST', [{ ...bodyArg(), schema: { type: 'string' } }], 'application/xml'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
       { ...tool('getFile', 'GET', [{ name: 'name', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{name}/data' },
       tool('vendorJsonString', 'POST', [bodyArg()], 'application/vnd.test+json'),
@@ -174,4 +176,33 @@ test('#78 bare dot-segment path values cannot redirect the request', async () =>
     assert.equal(result.isError, undefined);
     assert.equal(seen.at(-1)!.url.split('?')[0], `/api/files/${encodeURIComponent(name)}/data`);
   }
+});
+
+test('#82 urlencoded form objects use form wire encoding, never JSON mislabeled as form', async () => {
+  const result = await call('form', { body: { name: 'Alice Smith', count: 2, tags: ['one', 'two'], enabled: false } });
+  assert.equal(result.isError, undefined);
+  const request = seen.at(-1)!;
+  assert.equal(request.headers['content-type'], 'application/x-www-form-urlencoded');
+  const params = new URLSearchParams(request.body.toString('utf8'));
+  assert.equal(params.get('name'), 'Alice Smith');
+  assert.equal(params.get('count'), '2');
+  assert.deepEqual(params.getAll('tags'), ['one', 'two']);
+  assert.equal(params.get('enabled'), 'false');
+  const count = seen.length;
+  const invalid = await call('form', { body: { nested: { value: 1 } } });
+  assert.equal(invalid.isError, true);
+  assert.match(invalid.content[0].text, /Form field/);
+  assert.equal(seen.length, count);
+});
+
+test('#82 XML needs pre-serialized XML, never JSON mislabeled as XML', async () => {
+  const count = seen.length;
+  const invalid = await call('xml', { body: { name: 'Alice' } });
+  assert.equal(invalid.isError, true);
+  assert.match(invalid.content[0].text, /pre-serialized XML/);
+  assert.equal(seen.length, count);
+  const ok = await call('xml', { body: '<name>Alice</name>' });
+  assert.equal(ok.isError, undefined);
+  assert.equal(seen.at(-1)!.body.toString('utf8'), '<name>Alice</name>');
+  assert.equal(seen.at(-1)!.headers['content-type'], 'application/xml');
 });
