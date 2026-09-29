@@ -1,8 +1,15 @@
-name: Publish
+name: Release
+
+# Manual npm publish via trusted publishing (OIDC). The npm trusted
+# publisher for this package matches on this filename (release.yml); the
+# trusted-publishing token exchange replaces a long-lived npm token.
+#
+# Deliberately manual-only (workflow_dispatch): no push, tag, or release
+# event fires this. Rowan's initial 0.1.0 publish happens by hand first;
+# this workflow must not be able to beat it to the registry.
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -15,8 +22,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          # Latest Node 22.x (>= 22.14.0, the floor for trusted publishing).
           node-version: 22
           cache: npm
+          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
