@@ -3,5 +3,6 @@
   "baseUrl": "https://api.petstore.example/v1",
   "include": [
     "tag:pets"
-  ]
+  ],
+  "exclude": []
 }

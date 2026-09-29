@@ -1,4 +1,6 @@
 {
   "name": "notes-api",
-  "baseUrl": "https://api.notes.example/v1"
+  "baseUrl": "https://api.notes.example/v1",
+  "include": [],
+  "exclude": []
 }
