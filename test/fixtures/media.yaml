@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: Media API
+  version: 0.1.0
+  description: Fixture for multipart uploads and non-JSON responses.
+servers:
+  - url: https://api.media.test/media
+paths:
+  /pets/{petId}/photo:
+    post:
+      operationId: uploadPetPhoto
+      summary: Upload a pet photo
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: The photo image file
+                caption:
+                  type: string
+                  description: A caption for the photo
+                isPublic:
+                  type: boolean
+                  description: Whether the photo is publicly visible
+                labels:
+                  type: array
+                  items:
+                    type: string
+                  description: Labels to attach to the photo
+                metadata:
+                  type: object
+                  description: Arbitrary metadata stored with the photo
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+    get:
+      operationId: getPetPhoto
+      summary: Download a pet photo
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: ok
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+  /pets/{petId}/records:
+    get:
+      operationId: getPetRecords
+      summary: Download pet records as a PDF
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: ok
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+  /export:
+    get:
+      operationId: exportPets
+      summary: Export all pets as CSV
+      responses:
+        '200':
+          description: ok
+          content:
+            text/csv:
+              schema:
+                type: string
