@@ -145,6 +145,25 @@ function buildFormBody(tool, args) {
   return parts > 0 ? form : undefined;
 }
 
+/** Encode flat OpenAPI form objects. Arrays repeat the field name. */
+function formBody(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ToolArgumentError('Argument "body" must be an object for application/x-www-form-urlencoded.');
+  }
+  const params = new URLSearchParams();
+  for (const [key, field] of Object.entries(value)) {
+    if (field === undefined) continue;
+    const values = Array.isArray(field) ? field : [field];
+    for (const item of values) {
+      if (item === null || typeof item === 'object') {
+        throw new ToolArgumentError(`Form field "${key}" must be a scalar or array of scalars.`);
+      }
+      params.append(key, String(item));
+    }
+  }
+  return params.toString();
+}
+
 /** Apply the manifest's auth schemes. Missing env vars are skipped, not
  * fatal: many APIs allow anonymous calls, and an API that needs auth answers
  * with its own 401. Unset vars are listed once at server start. */
@@ -320,6 +339,15 @@ async function executeTool(manifest, tool, args, validateOutput) {
             if (err instanceof ToolArgumentError) return errorResult(err.message);
             throw err;
           }
+        } else if (baseContentType(tool.contentType) === 'application/x-www-form-urlencoded') {
+          try {
+            body = formBody(raw);
+          } catch (err) {
+            if (err instanceof ToolArgumentError) return errorResult(err.message);
+            throw err;
+          }
+        } else if (baseContentType(tool.contentType).endsWith('xml') && typeof raw !== 'string') {
+          return errorResult('Argument "body" must be a pre-serialized XML string.');
         } else {
           body = isJsonType(baseContentType(tool.contentType)) ? JSON.stringify(raw) : (typeof raw === 'string' ? raw : JSON.stringify(raw));
         }
