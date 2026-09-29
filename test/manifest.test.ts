@@ -141,4 +141,45 @@ test('AND schemes combine, and a valid OR alternative wins over an unresolved on
   assert.deepEqual(m.tools.find((t) => t.name === 'list_pets')?.authSchemeNames, ['bearerAuth', 'apiKeyQuery']);
   assert.deepEqual(m.tools.find((t) => t.name === 'create_pet')?.authSchemeNames, ['apiKeyQuery']);
   assert.deepEqual(m.auth.warnings, []);
+test('operations with a declared JSON response schema get an MCP outputSchema', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const getPet = m.tools.find((t) => t.name === 'get_pet');
+  assert.ok(getPet?.outputSchema, 'object response -> outputSchema');
+  assert.equal(getPet.outputWrap, undefined);
+  assert.equal(getPet.outputSchema.type, 'object');
+  const props = getPet.outputSchema.properties as Record<string, Record<string, unknown>>;
+  assert.equal(props.id?.type, 'integer');
+  assert.deepEqual(props.tag?.type, ['string', 'null'], 'nullable becomes a type union');
+  // Nested $refs are fully dereferenced: Pet.owner -> Owner -> Owner.pets.items -> Pet (cycle)
+  const owner = props.owner as Record<string, unknown>;
+  assert.equal(owner.type, 'object');
+  const ownerProps = owner.properties as Record<string, Record<string, unknown>>;
+  const petsItems = (ownerProps.pets?.items ?? {}) as Record<string, unknown>;
+  assert.equal(petsItems.type, 'object', 'cyclic ref resolved once');
+  const cyclicOwner = (petsItems.properties as Record<string, unknown>).owner;
+  assert.deepEqual(cyclicOwner, {}, 'cycle collapses to an open schema instead of recursing forever');
+
+  const createPet = m.tools.find((t) => t.name === 'create_pet');
+  assert.equal(createPet?.outputSchema?.type, 'object', 'non-200 2xx schemas are picked up too');
+
+  const listPets = m.tools.find((t) => t.name === 'list_pets');
+  assert.equal(listPets?.outputWrap, true, 'array body is wrapped for MCP object compliance');
+  assert.deepEqual(listPets?.outputSchema?.required, ['result']);
+  const result = (listPets?.outputSchema?.properties as Record<string, Record<string, unknown>>).result;
+  assert.equal(result?.type, 'array');
+  assert.equal((result?.items as Record<string, unknown>).type, 'object');
+});
+
+test('operations without a declared JSON response schema stay text-only', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+  for (const name of ['get_legacy', 'upload_file', 'delete_pet']) {
+    const tool = m.tools.find((t) => t.name === name);
+    assert.equal(tool?.outputSchema, undefined, `${name} has no outputSchema`);
+    assert.equal(tool?.outputWrap, undefined);
+  }
 });
