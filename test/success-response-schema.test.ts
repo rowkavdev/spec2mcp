@@ -26,6 +26,9 @@ test('2XX ranges and default fallback expose JSON output schemas', async () => {
   const properties = (name: string) => tools.find((t) => t.name === name)?.outputSchema?.properties;
   assert.deepEqual(Object.keys(properties('range') ?? {}), ['range']);
   assert.deepEqual(Object.keys(properties('fallback') ?? {}), ['fallback']);
-  assert.deepEqual(Object.keys(properties('priority') ?? {}), ['specific']);
-  assert.deepEqual(Object.keys(properties('range_priority') ?? {}), ['range']);
+  // #61: when the ranked success statuses declare different shapes, no
+  // single outputSchema is honest - advertise nothing rather than reject a
+  // valid response from a lower-ranked status against the winner's schema.
+  assert.equal(properties('priority'), undefined);
+  assert.equal(properties('range_priority'), undefined);
 });

@@ -274,6 +274,14 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
       const rank = (code: string) => /^2\d\d$/.test(code) ? 0 : /^2XX$/i.test(code) ? 1 : 2;
       return rank(a) - rank(b) || a.localeCompare(b);
     });
+  // MCP advertises one outputSchema per tool, so a schema is only honest
+  // when every success status that can return JSON agrees on the shape.
+  // A valid 201 must never fail client-side validation against a 200-only
+  // schema. Statuses without a JSON schema produce no structured content
+  // and cannot violate; a status whose schema is over budget has an unknown
+  // shape, which cannot be proven equal - advertise nothing rather than
+  // risk rejecting a valid success for a status we did not validate.
+  const shapes: Record<string, unknown>[] = [];
   for (const code of codes) {
     const content = op.responses[code]?.content ?? {};
     // A `* /*` entry counts as JSON when it declares an object-shaped
@@ -286,18 +294,22 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
         (isObjectSchemaEntry(content['*/*']) ? '*/*' : undefined));
     if (!mediaType) continue;
     const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
-    if (schema && typeof schema === 'object' && Object.keys(schema).length > 0) {
-      try {
-        return dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
-      } catch (error) {
-        // Over-budget: skip this status and keep the ranked loop alive -
-        // a later 2xx may carry a schema that fits the budget.
-        if (error instanceof SchemaTooLarge) continue;
-        throw error;
-      }
+    if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) continue;
+    let dereferenced: Record<string, unknown>;
+    try {
+      dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof SchemaTooLarge) return undefined;
+      throw error;
     }
+    shapes.push(dereferenced);
   }
-  return undefined;
+  if (shapes.length === 0) return undefined;
+  const first = JSON.stringify(shapes[0]);
+  for (const shape of shapes.slice(1)) {
+    if (JSON.stringify(shape) !== first) return undefined;
+  }
+  return shapes[0];
 }
 
 function isObjectSchemaEntry(entry: unknown): boolean {
