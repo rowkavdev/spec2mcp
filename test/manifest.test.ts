@@ -269,3 +269,52 @@ test('#96 an escaped-key $ref resolves instead of collapsing to an open object',
   assert.equal(props.name?.type, 'string');
   assert.deepEqual(getPet.outputSchema.required, ['id']);
 });
+
+test('#112 an escaped $ref below the component key resolves via hoisting', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/escaped-keys.yaml', import.meta.url)));
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const getDeep = m.tools.find((t) => t.name === 'get_deep');
+  assert.ok(getDeep?.outputSchema);
+  const props = getDeep.outputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+  assert.ok(props, 'deep escaped ref must not collapse to an empty schema');
+  assert.equal(props.code?.type, 'string');
+  assert.deepEqual(getDeep.outputSchema.required, ['code']);
+});
+
+test('#112 an unresolvable $ref stays text-only and warns loudly', async () => {
+  // A ref the loader cannot reach (inline docs skip loadSpec's bundler,
+  // which rejects dangling pointers outright).
+  const doc = {
+    openapi: '3.0.3',
+    info: { title: 'Dangling API', version: '1.0.0' },
+    servers: [{ url: 'https://dangling.example.com' }],
+    paths: {
+      '/things': {
+        get: {
+          operationId: 'getThing',
+          responses: {
+            '200': {
+              description: 'ok',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/Missing' } } },
+            },
+          },
+        },
+      },
+    },
+    components: { schemas: {} },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = buildManifest(doc as any);
+
+  const getThing = m.tools.find((t) => t.name === 'get_thing');
+  assert.ok(getThing);
+  assert.equal(getThing.outputSchema, undefined, 'never advertise the empty collapse');
+  assert.ok(
+    m.warnings?.some((w) => w.includes('#/components/schemas/Missing') && w.includes('get_thing')),
+    `expected a loud warning, got: ${(m.warnings ?? []).join(' | ')}`,
+  );
+});

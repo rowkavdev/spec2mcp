@@ -98,6 +98,9 @@ export type Manifest = {
   webhooks: WebhookInfo[];
   /** Custom JSON Schema dialect from the spec's jsonSchemaDialect field, if declared. */
   jsonSchemaDialect?: string;
+  /** Generation warnings beyond auth (auth carries its own): unresolved
+   * response $refs and similar contract losses the user must see. */
+  warnings?: string[];
   tools: ToolDef[];
 };
 
@@ -253,14 +256,14 @@ function jsonLength(value: unknown, budget: SchemaBudget): number {
   return JSON.stringify(value)?.length ?? 0;
 }
 
-function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0): unknown {
+function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0, onUnresolved?: (ref: string) => void): unknown {
   if (Array.isArray(node)) {
     charge(budget, 2); // brackets
     if (depth > MAX_SCHEMA_DEPTH) return [];
     const out: unknown[] = [];
     for (const value of node) {
       if (out.length) charge(budget, 1); // comma
-      out.push(dereferenceSchema(value, refChain, budget, depth + 1));
+      out.push(dereferenceSchema(value, refChain, budget, depth + 1, onUnresolved));
     }
     return out;
   }
@@ -283,6 +286,10 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     }
     const resolved = resolveDocRef(target) as Record<string, unknown>;
     if (resolved === target) {
+      // The walk failed: the pointer does not resolve (#112). Never
+      // advertise the empty collapse as a schema - the caller treats the
+      // shape as unknown and surfaces the ref instead.
+      onUnresolved?.(ref);
       charge(budget, 2);
       return {};
     }
@@ -300,7 +307,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     if (!Object.hasOwn(target, key) || key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') continue;
     charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
     first = false;
-    out[key] = dereferenceSchema(target[key], chain, budget, depth + 1);
+    out[key] = dereferenceSchema(target[key], chain, budget, depth + 1, onUnresolved);
   }
   if (target.nullable === true && typeof out.type === 'string') {
     // Replace the already-counted scalar type with its union representation.
@@ -318,7 +325,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
 }
 
 /** Prefer specific 2xx codes, then the 2XX range, then default. */
-function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefined {
+function successJsonSchema(op: OperationInfo, onUnresolved?: (ref: string) => void): Record<string, unknown> | undefined {
   const codes = Object.keys(op.responses ?? {})
     .filter((c) => /^2\d\d$/.test(c) || /^2XX$/i.test(c) || c === 'default')
     .sort((a, b) => {
@@ -333,6 +340,11 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   // shape, which cannot be proven equal - advertise nothing rather than
   // risk rejecting a valid success for a status we did not validate.
   const shapes: Record<string, unknown>[] = [];
+  let unresolvedRef = false;
+  const trackUnresolved = (ref: string): void => {
+    unresolvedRef = true;
+    onUnresolved?.(ref);
+  };
   for (const code of codes) {
     const content = op.responses[code]?.content ?? {};
     // Every declared successful representation must be able to satisfy the
@@ -358,11 +370,15 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
       if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) return undefined;
       let dereferenced: Record<string, unknown>;
       try {
-        dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+        dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }, 0, trackUnresolved) as Record<string, unknown>;
       } catch (error) {
         if (error instanceof SchemaTooLarge) return undefined;
         throw error;
       }
+      // An unresolved $ref collapses to an open schema (#112); advertising
+      // it would accept everything, so the tool stays text-only and the
+      // ref is surfaced through onUnresolved.
+      if (unresolvedRef) return undefined;
       shapes.push(dereferenced);
     }
   }
@@ -481,6 +497,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
   const baseUrl = opts.baseUrl ?? firstServer;
 
   const operationIds = getAllOperationIds();
+  const warnings: string[] = [];
   const tagsById = operationTags(doc);
   const selectedIds = operationIds.filter((id) => operationIncluded(id, tagsById.get(id) ?? [], opts));
   const toolNames = dedupeNames(selectedIds.map(toToolName));
@@ -593,7 +610,9 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     }
 
 
-    const responseSchema = successJsonSchema(op);
+    const responseSchema = successJsonSchema(op, (ref) => {
+      warnings.push(`${toolName}: response schema $ref "${ref}" could not be resolved; the tool stays text-only (#112)`);
+    });
     if (responseSchema) {
       // The advertised top-level type must be the literal "object" (MCP
       // clients validate it). MCP requires object-shaped structured
@@ -617,6 +636,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
 
   const manifest: Manifest = {
     generator: `spec2mcp`,
+    ...(warnings.length > 0 ? { warnings } : {}),
     apiTitle,
     apiVersion: info.version ?? '0.0.0',
     specVersion: doc.openapi ?? '',

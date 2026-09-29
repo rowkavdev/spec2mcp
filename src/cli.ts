@@ -103,6 +103,7 @@ async function cmdServe(spec: string, flags: ManifestOptions & { name?: string; 
   await init(doc);
   const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of manifest.auth.warnings) console.error(`warning: ${warning}`);
+  for (const warning of manifest.warnings ?? []) console.error(`warning: ${warning}`);
   const runtimeUrl = new URL('../runtime/server.mjs', import.meta.url).href;
   const runtime = (await import(runtimeUrl)) as {
     runServer: (manifest: import('./manifest.js').Manifest) => Promise<void>;

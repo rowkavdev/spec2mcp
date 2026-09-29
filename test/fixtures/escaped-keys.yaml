@@ -15,8 +15,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/pet~1variant'
+  /deep:
+    get:
+      operationId: getDeep
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/deep~1inner/properties/a~1b'
 components:
   schemas:
+    deep/inner:
+      type: object
+      properties:
+        a/b:
+          type: object
+          required: [code]
+          properties:
+            code:
+              type: string
     pet/variant:
       type: object
       required: [id]
