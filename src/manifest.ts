@@ -374,23 +374,36 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   return shapes[0];
 }
 
-const nullProbe = new AjvJsonSchemaValidator();
+const rootProbe = new AjvJsonSchemaValidator();
 
 /**
- * Root-level nullability (#92, #95): a null root is a real response, and
- * MCP structured content cannot express it unwrapped - such schemas take
- * the result wrap. Nullability hides in many shapes (type unions, anyOf,
- * oneOf, enum, const, not), so probe the dereferenced schema with the
- * validator instead of enumerating them: if JSON null validates, wrap.
- * An uncompilable schema cannot prove null is valid; do not wrap on a
- * guess, matching the compile-time fallback.
+ * MCP structured content must be an object, so a schema that also admits a
+ * non-object root - null, array or scalar, via type unions, anyOf, oneOf,
+ * enum, const, not, or an unconstrained schema - takes the result wrap
+ * (#92, #95, #102). These shapes hide behind many keywords, so probe the
+ * dereferenced schema with the same validator the runtime uses instead of
+ * enumerating keywords. Explicitly non-object schemas are already wrapped
+ * via schemaIsObject; here representative non-object values plus the
+ * schema's own enum/const probe object-capable shapes. An uncompilable
+ * schema cannot prove a non-object root is valid; do not wrap on a guess,
+ * matching the compile-time fallback. A deeply constrained variant (oneOf
+ * [object, array with minItems]) can still slip past fixed probes; the
+ * runtime then reports drift as a tool error, never a protocol violation.
  */
-function schemaValidatesNull(schema: Record<string, unknown>): boolean {
+function schemaAdmitsNonObjectRoot(schema: Record<string, unknown>): boolean {
+  const candidates: unknown[] = [null, [], ['x'], '', 'x', 0, 1, true, false];
+  if (Array.isArray(schema.enum)) candidates.push(...schema.enum);
+  if ('const' in schema) candidates.push(schema.const);
+  let validate: (value: unknown) => { valid: boolean };
   try {
-    return nullProbe.getValidator(schema)(null).valid === true;
+    validate = rootProbe.getValidator(schema) as (value: unknown) => { valid: boolean };
   } catch {
     return false;
   }
+  return candidates.some((value) => {
+    const nonObject = value === null || Array.isArray(value) || typeof value !== 'object';
+    return nonObject && validate(value).valid === true;
+  });
 }
 
 function schemaIsObject(schema: Record<string, unknown>): boolean {
@@ -581,7 +594,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       // content, so arrays, primitives and root-nullable schemas (#92: a
       // valid JSON null cannot be emitted unwrapped) go under a single
       // "result" property; plain object schemas advertise as-is.
-      const wrap = !schemaIsObject(responseSchema) || schemaValidatesNull(responseSchema);
+      const wrap = !schemaIsObject(responseSchema) || schemaAdmitsNonObjectRoot(responseSchema);
       const candidate = wrap
         ? { type: 'object', properties: { result: responseSchema }, required: ['result'] }
         : { ...responseSchema, type: 'object' };
