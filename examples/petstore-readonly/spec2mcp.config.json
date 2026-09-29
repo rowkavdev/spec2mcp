@@ -1,0 +1,7 @@
+{
+  "name": "petstore-readonly",
+  "baseUrl": "https://api.petstore.example/v1",
+  "include": [
+    "tag:pets"
+  ]
+}
