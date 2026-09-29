@@ -5,7 +5,13 @@
  * interprets it is identical for every spec.
  */
 import type { OpenAPIV3 } from 'openapi-types';
-import { getAllOperationIds, resolveOperation, type ParameterInfo } from '../vendor/forge/index.js';
+import {
+  getAllOperationIds,
+  resolveOperation,
+  resolveDocRef,
+  type OperationInfo,
+  type ParameterInfo,
+} from '../vendor/forge/index.js';
 import { toToolName, dedupeNames, toEnvPrefix } from './naming.js';
 import { buildAuthPlan, type AuthPlan } from './auth.js';
 
@@ -29,6 +35,18 @@ export type ToolDef = {
   contentType?: string;
   /** True when the request body is a top-level array - exposed as one "body" arg. */
   requestBodyIsArray?: boolean;
+  /**
+   * MCP outputSchema for the tool, emitted when the spec declares a known
+   * JSON schema for a 2xx response. Always an object schema per the MCP
+   * spec; absent for freeform/unknown responses (those stay text-only).
+   */
+  outputSchema?: Record<string, unknown>;
+  /**
+   * True when the API's success body is not a JSON object (array or
+   * primitive) and the runtime wraps it as { result: ... } in
+   * structuredContent to satisfy MCP's object requirement.
+   */
+  outputWrap?: boolean;
   args: ToolArg[];
   inputSchema: Record<string, unknown>;
   /** Names of schemes used by this operation; [] explicitly sends no auth. */
@@ -72,6 +90,71 @@ function argSchema(p: ParameterInfo): Record<string, unknown> {
 function pickContentType(contentTypes: string[]): string | undefined {
   if (contentTypes.includes('application/json')) return 'application/json';
   return contentTypes[0];
+}
+
+
+/**
+ * Deeply resolve `$ref`s inside a response schema into a self-contained JSON
+ * Schema, safe for MCP clients that have no access to the OpenAPI document.
+ * `resolveDocRef` follows one level; we recurse through the schema tree.
+ * Cyclic refs (common in component schemas) collapse to `{}` (any) instead
+ * of recursing forever. OpenAPI-only annotations that mean nothing to a JSON
+ * Schema validator are dropped; `nullable: true` becomes a type union.
+ */
+function dereferenceSchema(node: unknown, refChain: Set<string>): unknown {
+  if (Array.isArray(node)) return node.map((v) => dereferenceSchema(v, refChain));
+  if (!node || typeof node !== 'object') return node;
+
+  let target = node as Record<string, unknown>;
+  const ref = typeof target.$ref === 'string' ? target.$ref : undefined;
+  let chain = refChain;
+  if (ref) {
+    if (refChain.has(ref)) return {};
+    const resolved = resolveDocRef(target) as Record<string, unknown>;
+    if (resolved === target) return {};
+    chain = new Set(refChain);
+    chain.add(ref);
+    target = resolved;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(target)) {
+    if (key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') {
+      continue;
+    }
+    out[key] = dereferenceSchema(value, chain);
+  }
+  if (target.nullable === true && typeof out.type === 'string') {
+    out.type = [out.type, 'null'];
+  }
+  return out;
+}
+
+/** Pick the JSON schema of the preferred 2xx response, if the spec declares one. */
+function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefined {
+  const codes = Object.keys(op.responses ?? {})
+    .filter((c) => /^2\d\d$/.test(c))
+    .sort();
+  for (const code of codes) {
+    const content = op.responses[code]?.content ?? {};
+    const mediaType = Object.keys(content).includes('application/json')
+      ? 'application/json'
+      : Object.keys(content).find((m) => m.toLowerCase().includes('json'));
+    if (!mediaType) continue;
+    const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
+    if (schema && typeof schema === 'object' && Object.keys(schema).length > 0) {
+      return dereferenceSchema(schema, new Set()) as Record<string, unknown>;
+    }
+  }
+  return undefined;
+}
+
+function schemaIsObject(schema: Record<string, unknown>): boolean {
+  const t = schema.type;
+  if (typeof t === 'string') return t === 'object';
+  if (Array.isArray(t)) return t.includes('object');
+  // No explicit type: object-shaped keywords (properties, allOf, ...) imply object.
+  return true;
 }
 
 export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {}): Manifest {
@@ -158,6 +241,18 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
+
+    const responseSchema = successJsonSchema(op);
+    if (responseSchema) {
+      if (schemaIsObject(responseSchema)) {
+        tool.outputSchema = { type: 'object', ...responseSchema };
+      } else {
+        // MCP requires object-shaped structured content: wrap arrays and
+        // primitives under a single "result" property.
+        tool.outputSchema = { type: 'object', properties: { result: responseSchema }, required: ['result'] };
+        tool.outputWrap = true;
+      }
+    }
     tools.push(tool);
   });
 
