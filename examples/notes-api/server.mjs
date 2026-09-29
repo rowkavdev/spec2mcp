@@ -252,33 +252,39 @@ async function executeTool(manifest, tool, args, validateOutput) {
       path = path.replace(`{${arg.apiName ?? arg.name}}`, encodeURIComponent(String(value)));
     }
   }
-  const url = new URL(baseUrl);
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}`;
-  for (const arg of tool.args) {
-    const value = args[arg.name];
-    if (value === undefined) continue;
-    if (arg.location === 'query') {
-      const wireName = arg.apiName ?? arg.name;
-      if (Array.isArray(value)) {
-        for (const item of value) url.searchParams.append(wireName, String(item));
-      } else if (typeof value === 'object' && value !== null) {
-        url.searchParams.append(wireName, JSON.stringify(value));
-      } else {
-        url.searchParams.append(wireName, String(value));
+  let url;
+  let headers;
+  try {
+    url = new URL(baseUrl);
+    url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}`;
+    for (const arg of tool.args) {
+      const value = args[arg.name];
+      if (value === undefined) continue;
+      if (arg.location === 'query') {
+        const wireName = arg.apiName ?? arg.name;
+        if (Array.isArray(value)) {
+          for (const item of value) url.searchParams.append(wireName, String(item));
+        } else if (typeof value === 'object' && value !== null) {
+          url.searchParams.append(wireName, JSON.stringify(value));
+        } else {
+          url.searchParams.append(wireName, String(value));
+        }
       }
     }
-  }
 
-  const headers = new Headers();
-  const declaredResponses = tool.responseContentTypes;
-  headers.set('accept', declaredResponses && declaredResponses.length > 0 ? declaredResponses.join(', ') : 'application/json');
-  for (const arg of tool.args) {
-    const value = args[arg.name];
-    if (value === undefined || arg.location !== 'header') continue;
-    headers.set(arg.apiName ?? arg.name, String(value));
-  }
+    headers = new Headers();
+    const declaredResponses = tool.responseContentTypes;
+    headers.set('accept', declaredResponses && declaredResponses.length > 0 ? declaredResponses.join(', ') : 'application/json');
+    for (const arg of tool.args) {
+      const value = args[arg.name];
+      if (value === undefined || arg.location !== 'header') continue;
+      headers.set(arg.apiName ?? arg.name, String(value));
+    }
 
-  applyAuth(manifest, tool, url, headers);
+    applyAuth(manifest, tool, url, headers);
+  } catch {
+    return errorResult('Invalid request URL or header argument.');
+  }
 
   let body;
   const bodyArgs = tool.args.filter((a) => a.location === 'body');
@@ -323,7 +329,11 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }
     // FormData sets its own content-type with the multipart boundary.
     if (body !== undefined && !(body instanceof FormData)) {
-      headers.set('content-type', tool.contentType ?? 'application/json');
+      try {
+        headers.set('content-type', tool.contentType ?? 'application/json');
+      } catch {
+        return errorResult('Invalid request Content-Type header.');
+      }
     }
   }
 

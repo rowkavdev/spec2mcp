@@ -60,6 +60,7 @@ before(async () => {
       tool('optional', 'POST', [{ name: 'name', location: 'body', apiFieldPath: ['name'], required: false, schema: { type: 'string' } }], 'application/json'),
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
+      tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
       tool('vendorJsonString', 'POST', [bodyArg()], 'application/vnd.test+json'),
     ],
   };
@@ -144,4 +145,17 @@ test('#73 JSON top-level strings are quoted, including +json; text bodies stay r
   const plain = await call('plain', { body: 'hello' });
   assert.equal(plain.isError, undefined);
   assert.equal(seen.at(-1)!.body.toString('utf8'), 'hello');
+});
+
+test('#77 malformed header arguments yield tool errors, not protocol exceptions', async () => {
+  const count = seen.length;
+  for (const xTrace of ['evil\r\nInjected: yes', 'bad\nvalue']) {
+    const response = await call('headerValue', { xTrace });
+    assert.equal(response.isError, true);
+    assert.match(response.content[0].text, /Invalid request URL or header argument/);
+  }
+  assert.equal(seen.length, count, 'no invalid header request reached upstream');
+  const ok = await call('headerValue', { xTrace: 'valid' });
+  assert.equal(ok.isError, undefined);
+  assert.equal(seen.at(-1)!.headers['x-trace'], 'valid');
 });
