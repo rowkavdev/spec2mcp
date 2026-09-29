@@ -48,8 +48,13 @@ before(async () => {
     req.on('end', () => {
       seen.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body });
       res.writeHead(200, { 'content-type': 'application/json' });
-      const isList = req.method === 'GET' && (req.url === '/v1/pets' || (req.url ?? '').startsWith('/v1/pets?'));
-      res.end(JSON.stringify(isList ? [{ id: 1, name: 'Rex' }] : { ok: true }));
+      const url = req.url ?? '';
+      const isList = req.method === 'GET' && (url === '/v1/pets' || url.startsWith('/v1/pets?'));
+      // Pet-shaped for get_pet so its structuredContent validates; the
+      // { ok: true } fallback elsewhere doubles as a drifted body for
+      // create_pet, whose outputSchema declares a Pet.
+      const petMatch = req.method === 'GET' ? /^\/v1\/pets\/(\d+)$/.exec(url) : null;
+      res.end(JSON.stringify(isList ? [{ id: 1, name: 'Rex' }] : petMatch ? { id: Number(petMatch[1]), name: 'Rex' } : { ok: true }));
     });
   });
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
@@ -116,7 +121,7 @@ test('tools/call substitutes path params and sends bearer auth', async () => {
   seen.length = 0;
   const res = await rpc('tools/call', { name: 'get_pet', arguments: { petId: 42 } });
   const content = (res.result as Record<string, unknown>).content as { text: string }[];
-  assert.match(content[0]!.text, /"ok": true/);
+  assert.match(content[0]!.text, /"name": "Rex"/);
   assert.equal(seen.length, 1);
   assert.equal(seen[0]!.method, 'GET');
   assert.equal(seen[0]!.url, '/v1/pets/42');
@@ -178,9 +183,20 @@ test('tools/list advertises outputSchema only where the spec declares one', asyn
 test('tools/call returns structuredContent for an object response', async () => {
   const res = await rpc('tools/call', { name: 'get_pet', arguments: { petId: 7 } });
   const result = res.result as Record<string, unknown>;
-  assert.deepEqual(result.structuredContent, { ok: true });
+  assert.deepEqual(result.structuredContent, { id: 7, name: 'Rex' });
   const content = result.content as { type: string; text: string }[];
-  assert.match(content[0]!.text, /"ok": true/, 'text content kept alongside structuredContent');
+  assert.match(content[0]!.text, /"id": 7/, 'text content kept alongside structuredContent');
+});
+
+test('tools/call falls back to text-only when the response drifts from the outputSchema', async () => {
+  // The mock answers POST /pets with { ok: true }, which is not Pet-shaped:
+  // the runtime must not attach structuredContent the SDK client would reject.
+  const res = await rpc('tools/call', { name: 'create_pet', arguments: { name: 'Rex' } });
+  const result = res.result as Record<string, unknown>;
+  assert.equal(result.isError, undefined, 'drift is not a tool error');
+  assert.equal(result.structuredContent, undefined, 'drifted response is not attached');
+  const content = result.content as { type: string; text: string }[];
+  assert.match(content[0]!.text, /"ok": true/, 'text content survives the fallback');
 });
 
 test('tools/call wraps an array response under result', async () => {
