@@ -6,7 +6,7 @@
  */
 import type { OpenAPIV3 } from 'openapi-types';
 import type { TransformerFn } from '../vendor/forge/index.js';
-import { buildManifest, type Manifest, type ManifestOptions } from './manifest.js';
+import { buildManifest, DEFAULT_31_DIALECT, type Manifest, type ManifestOptions } from './manifest.js';
 import { toKebab } from './naming.js';
 import { CONFIG_FILE, type ProjectConfig } from './config.js';
 
@@ -112,6 +112,24 @@ function generatedReadme(manifest: Manifest): string {
   }
   lines.push(`Base URL: \`${manifest.baseUrl || '(set ' + manifest.auth.baseUrlEnvVar + ')'}\` - override with \`${manifest.auth.baseUrlEnvVar}\`.`);
   lines.push('');
+  if (manifest.webhooks.length > 0) {
+    lines.push('## Webhooks');
+    lines.push('');
+    lines.push(`The spec declares ${manifest.webhooks.length} webhook${manifest.webhooks.length === 1 ? '' : 's'}. A webhook is an event ${manifest.apiTitle} sends to *your* server, so webhooks are not exposed as tools - receive them with your own HTTP endpoint.`);
+    lines.push('');
+    lines.push('| Webhook | Event | Description |');
+    lines.push('| --- | --- | --- |');
+    for (const w of manifest.webhooks) {
+      lines.push(`| \`${w.name}\` | ${w.method} | ${w.description.replace(/\|/g, '\\|')} |`);
+    }
+    lines.push('');
+  }
+  if (manifest.jsonSchemaDialect && manifest.jsonSchemaDialect !== DEFAULT_31_DIALECT) {
+    lines.push('## JSON Schema dialect');
+    lines.push('');
+    lines.push(`The spec declares a custom schema dialect: \`${manifest.jsonSchemaDialect}\`. Tool argument schemas are approximated as standard JSON Schema; validate responses against the dialect yourself if your client depends on it.`);
+    lines.push('');
+  }
   return lines.join('\n');
 }
 
