@@ -58,6 +58,11 @@ paths:
       operationId: getData
       responses:
         '200': { description: ok }
+  /bad-utf8:
+    get:
+      operationId: getBadUtf8
+      responses:
+        '200': { description: ok }
   /big:
     get:
       operationId: getBig

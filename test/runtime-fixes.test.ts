@@ -59,6 +59,10 @@ before(async () => {
       if (url.startsWith('/data')) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end('{not valid json');
+      } else if (url.startsWith('/bad-utf8')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        // A lossy UTF-8 decode yields valid JSON with a replacement char.
+        res.end(Buffer.from([0x7b, 0x22, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]));
       } else if (url.startsWith('/big')) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ data: 'x'.repeat(5000) }));
@@ -190,4 +194,12 @@ test('#41 an apiKey query credential cannot be shadowed by a caller argument', a
   const req = seen.get('GET /secure')?.at(-1);
   const params = new URL(req?.url ?? '', apiBase).searchParams;
   assert.deepEqual(params.getAll('api_key'), ['secret-token'], 'exactly the credential, caller value gone');
+});
+
+test('#103 invalid UTF-8 in declared JSON is a tool error, not repaired success', async () => {
+  const result = await callTool('get_bad_utf8', {});
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent, undefined);
+  assert.match(result.content?.[0]?.text ?? '', /not valid JSON.*invalid UTF-8/);
+  assert.match(result.content?.[0]?.text ?? '', /\uFFFD/);
 });

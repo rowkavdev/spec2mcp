@@ -502,17 +502,20 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }, tool, 'non-JSON response has no structured content');
   }
 
+  let parsedJson;
   if (isJsonType(contentType)) {
+    let decoded;
     try {
-      JSON.parse(bytes.toString('utf8'));
-    } catch (err) {
+      decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      parsedJson = JSON.parse(decoded);
+    } catch {
+      // A bounded preview is diagnostic only; replacement characters here
+      // cannot turn malformed UTF-8 into a successful JSON response.
       const preview = truncateText(bytes.toString('utf8'));
-      return errorResult(
-        `HTTP ${res.status} ${res.statusText} declared JSON but the body is not valid JSON (${err instanceof Error ? err.message : String(err)}).\n${preview}`.trim(),
-      );
+      return errorResult(`HTTP ${res.status} ${res.statusText} declared JSON but the body is not valid JSON (invalid UTF-8 or JSON syntax).\n${preview}`.trim());
     }
   }
-  const result = textResult(truncateText(renderText(bytes, contentType)));
+  const result = textResult(truncateText(isJsonType(contentType) ? JSON.stringify(parsedJson, null, 2) : renderText(bytes, contentType)));
   // Successful calls advertising outputSchema must have valid structuredContent.
   // A drifted, truncated or non-JSON upstream response stays visible as a tool
   // error, rather than violating the MCP client protocol with text-only success.
@@ -520,7 +523,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
     if (!isJsonType(contentType)) {
       return outputFallback(result, tool, 'non-JSON response has no structured content');
     }
-    const parsed = JSON.parse(bytes.toString('utf8')); // checked above
+    const parsed = parsedJson; // decoded and parsed without UTF-8 replacement above
     const structured = tool.outputWrap
       ? { result: parsed }
       : (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : undefined);
