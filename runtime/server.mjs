@@ -49,16 +49,23 @@ function errorResult(text) {
 function setNested(target, fieldPath, value) {
   if (!fieldPath || fieldPath.length === 0) return value;
   let cursor = target;
+  // defineProperty, never plain assignment: a segment like "__proto__" must
+  // become an own enumerable property (plain assignment would retarget the
+  // prototype and silently drop the field from the JSON body).
+  const define = (obj, key, val) =>
+    Object.defineProperty(obj, key, { value: val, writable: true, enumerable: true, configurable: true });
   for (let i = 0; i < fieldPath.length - 1; i++) {
     const key = fieldPath[i];
-    if (typeof cursor[key] !== 'object' || cursor[key] === null) cursor[key] = {};
+    if (!Object.prototype.hasOwnProperty.call(cursor, key) || typeof cursor[key] !== 'object' || cursor[key] === null) {
+      define(cursor, key, {});
+    }
     cursor = cursor[key];
   }
-  cursor[fieldPath[fieldPath.length - 1]] = value;
+  define(cursor, fieldPath[fieldPath.length - 1], value);
   return target;
 }
 
-const BASE64_RE = /^[A-Za-z0-9+/=\s]*$/;
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 /**
  * Validate a binary multipart argument ({ contentBase64, filename?,
@@ -71,10 +78,18 @@ function filePart(arg, value) {
     );
   }
   const contentBase64 = value.contentBase64;
+  // Canonical base64 only: correct alphabet, no whitespace, padding solely at
+  // the end. Node's decoder silently ignores invalid characters, so corrupt
+  // uploads would otherwise be "accepted" as different bytes than supplied.
   if (typeof contentBase64 !== 'string' || contentBase64.length === 0 || !BASE64_RE.test(contentBase64)) {
-    throw new ToolArgumentError(`Argument "${arg.name}": contentBase64 must be a non-empty base64 string.`);
+    throw new ToolArgumentError(
+      `Argument "${arg.name}": contentBase64 must be a non-empty canonical base64 string (no whitespace, correct padding).`,
+    );
   }
   const bytes = Buffer.from(contentBase64, 'base64');
+  if (bytes.length === 0 || bytes.toString('base64') !== contentBase64) {
+    throw new ToolArgumentError(`Argument "${arg.name}": contentBase64 does not round-trip; refusing to upload corrupt data.`);
+  }
   const filename = typeof value.filename === 'string' && value.filename.length > 0 ? value.filename : arg.name;
   const mimeType = typeof value.mimeType === 'string' && value.mimeType.length > 0 ? value.mimeType : 'application/octet-stream';
   return { bytes, filename, mimeType };
@@ -128,7 +143,9 @@ function applyAuth(manifest, tool, url, headers) {
         headers.set(scheme.headerName, value);
         break;
       case 'apikey-query':
-        url.searchParams.append(scheme.queryName, value);
+        // set(), not append(): a caller-supplied query argument of the same
+        // name must never shadow (or duplicate alongside) the credential.
+        url.searchParams.set(scheme.queryName, value);
         break;
     }
   }
@@ -514,7 +531,11 @@ async function executeTool(manifest, tool, args, validateOutput) {
         if (err instanceof ToolArgumentError) return errorResult(err.message);
         throw err;
       }
-    } else if (tool.requestBodyIsArray || tool.args.length === 1) {
+    } else if (
+      tool.requestBodyIsArray ||
+      (tool.args.filter((a) => a.location === 'body').length === 1 &&
+        tool.args.some((a) => a.location === 'body' && a.name === 'body' && (!a.apiFieldPath || a.apiFieldPath.length === 0)))
+    ) {
       const raw = args.body;
       body = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {});
     } else {
@@ -546,7 +567,12 @@ async function executeTool(manifest, tool, args, validateOutput) {
   }
 
   const contentType = baseContentType(res.headers.get('content-type'));
-  const bytes = Buffer.from(await res.arrayBuffer());
+  let bytes;
+  try {
+    bytes = Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    return errorResult(`Failed to read the response body: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (!res.ok) {
     const detail = isTextLikeType(contentType)
@@ -574,6 +600,16 @@ async function executeTool(manifest, tool, args, validateOutput) {
     };
   }
 
+  if (isJsonType(contentType)) {
+    try {
+      JSON.parse(bytes.toString('utf8'));
+    } catch (err) {
+      const preview = truncateText(bytes.toString('utf8'));
+      return errorResult(
+        `HTTP ${res.status} ${res.statusText} declared JSON but the body is not valid JSON (${err instanceof Error ? err.message : String(err)}).\n${preview}`.trim(),
+      );
+    }
+  }
   const result = textResult(truncateText(renderText(bytes, contentType)));
   // Tools with a manifest outputSchema also return structuredContent (MCP
   // spec). The text content stays for clients without structured support.
@@ -598,6 +634,10 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }
     if (structured && validateOutput && !validateOutput(structured)) {
       console.error(`${manifest.serverName}: ${tool.name}: response does not match its outputSchema; returning text-only`);
+      structured = undefined;
+    }
+    if (structured && JSON.stringify(structured).length > MAX_RESPONSE_CHARS) {
+      console.error(`${manifest.serverName}: ${tool.name}: structuredContent exceeds SPEC2MCP_MAX_RESPONSE_CHARS; returning truncated text only`);
       structured = undefined;
     }
     if (structured) result.structuredContent = structured;
