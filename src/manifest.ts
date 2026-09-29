@@ -546,6 +546,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     if (!op || !toolName) return;
 
     const args: ToolArg[] = [];
+    const nullableParents: { arg: ToolArg; node: Record<string, unknown> }[] = [];
     for (const p of op.pathParams) {
       args.push({ name: p.name, location: 'path', required: true, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
@@ -602,16 +603,38 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
           const node = bodySchemaAtPath(doc, op, prefix);
           if (!node || node.nullable !== true) continue;
           if (node.type !== 'object' && !node.properties && !Array.isArray(node.allOf)) continue;
-          args.push({
+          // The object branch carries the full dereferenced shape (minus
+          // the nullable marker), so "pet.id required when pet is an
+          // object" is enforced inside the parent route too (#122). A
+          // schema too large to inline falls back to the coarse object
+          // branch, matching argSchema's coarseness elsewhere.
+          let objectBranch: Record<string, unknown> = { type: 'object' };
+          try {
+            const dereferenced = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+            if (dereferenced && typeof dereferenced === 'object') objectBranch = dereferenced;
+            // The null sibling covers nullability; the object branch must
+            // admit objects only, or its required properties would also
+            // demand them on a null value.
+            if (Array.isArray(objectBranch.type)) {
+              const nonNull = objectBranch.type.filter((t) => t !== 'null');
+              objectBranch.type = nonNull.length === 1 ? nonNull[0] : nonNull;
+            }
+            delete objectBranch.nullable;
+          } catch {
+            // SchemaTooLarge: keep the coarse branch.
+          }
+          const arg: ToolArg = {
             name: key,
             location: 'body',
             apiFieldPath: prefix,
             required: depth === 1 ? bodyRequired && rootRequired.has(prefix[0] ?? '') : false,
             schema: {
-              anyOf: [{ type: 'object' }, { type: 'null' }],
+              anyOf: [objectBranch, { type: 'null' }],
               ...(typeof node.description === 'string' ? { description: node.description } : {}),
             },
-          });
+          };
+          args.push(arg);
+          if (depth === 1) nullableParents.push({ arg, node });
         }
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
@@ -643,6 +666,30 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       setOwn(properties, a.name, a.schema);
       if (a.required) requiredArgs.push(a.name);
     }
+    // A required nullable parent with required leaves cannot sit in
+    // `required` flatly: requiring both pet and pet.id makes the null
+    // branch inaccessible (#122). The runtime's coverage rule accepts
+    // either route (parent arg or leaf args), so the input schema says the
+    // same with conditional clauses: presence is the parent OR any
+    // descendant, and each required descendant is itself OR an ancestor.
+    const conditional: Record<string, unknown>[] = [];
+    const bodyArgs = args.filter((a) => a.location === 'body' && a.apiFieldPath && a.apiFieldPath.length > 0);
+    for (const { arg: parent } of nullableParents) {
+      if (!parent.required) continue;
+      const root = parent.apiFieldPath![0];
+      const subtree = bodyArgs.filter((a) => a !== parent && a.apiFieldPath![0] === root);
+      if (subtree.length === 0) continue;
+      const drop = new Set([parent.name, ...subtree.filter((a) => a.required).map((a) => a.name)]);
+      for (let i = requiredArgs.length - 1; i >= 0; i--) {
+        if (drop.has(requiredArgs[i]!)) requiredArgs.splice(i, 1);
+      }
+      conditional.push({ anyOf: [parent, ...subtree].map((a) => ({ required: [a.name] })) });
+      for (const leaf of subtree) {
+        if (!leaf.required) continue;
+        const ancestors = [parent, ...subtree.filter((a) => a !== leaf && leaf.apiFieldPath!.length > a.apiFieldPath!.length && a.apiFieldPath!.every((seg, i) => leaf.apiFieldPath![i] === seg))];
+        conditional.push({ anyOf: [leaf, ...ancestors].map((a) => ({ required: [a.name] })) });
+      }
+    }
 
     const description =
       op.description.split('\n')[0]?.trim() || `${op.method.toUpperCase()} ${op.path}`;
@@ -659,7 +706,13 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods] as OpenAPIV3.OperationObject ?? {},
         `${op.method.toUpperCase()} ${op.path}`,
       ),
-      inputSchema: { type: 'object', properties, required: requiredArgs, additionalProperties: false },
+      inputSchema: {
+        type: 'object',
+        properties,
+        required: requiredArgs,
+        additionalProperties: false,
+        ...(conditional.length > 0 ? { allOf: conditional } : {}),
+      },
     };
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
