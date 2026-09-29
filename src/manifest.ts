@@ -113,32 +113,82 @@ const MAX_SCHEMA_DEPTH = 12;
  * tools/list, and multi-MB listings break MCP stdio clients. */
 const MAX_OUTPUT_SCHEMA_BYTES = 4096;
 
-function dereferenceSchema(node: unknown, refChain: Set<string>, depth = 0): unknown {
-  if (Array.isArray(node)) return depth > MAX_SCHEMA_DEPTH ? [] : node.map((v) => dereferenceSchema(v, refChain, depth + 1));
-  if (!node || typeof node !== 'object') return node;
-  if (depth > MAX_SCHEMA_DEPTH) return {};
+/**
+ * Limit work while constructing a schema, not after allocating the entire
+ * dereferenced tree. The extra room permits the root object type override
+ * (which can shorten a nullable object type) before the exact final check.
+ */
+const DEREFERENCE_BYTE_BUDGET = MAX_OUTPUT_SCHEMA_BYTES + 64;
+
+class SchemaTooLarge extends Error {}
+
+type SchemaBudget = { remaining: number };
+
+function charge(budget: SchemaBudget, bytes: number): void {
+  budget.remaining -= bytes;
+  if (budget.remaining < 0) throw new SchemaTooLarge();
+}
+
+/** Count JSON.stringify's UTF-16 length, including escaping, before copying. */
+function jsonLength(value: unknown, budget: SchemaBudget): number {
+  if (typeof value === 'string' && value.length + 2 > budget.remaining) throw new SchemaTooLarge();
+  return JSON.stringify(value)?.length ?? 0;
+}
+
+function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0): unknown {
+  if (Array.isArray(node)) {
+    charge(budget, 2); // brackets
+    if (depth > MAX_SCHEMA_DEPTH) return [];
+    const out: unknown[] = [];
+    for (const value of node) {
+      if (out.length) charge(budget, 1); // comma
+      out.push(dereferenceSchema(value, refChain, budget, depth + 1));
+    }
+    return out;
+  }
+  if (!node || typeof node !== 'object') {
+    charge(budget, jsonLength(node, budget));
+    return node;
+  }
+  if (depth > MAX_SCHEMA_DEPTH) {
+    charge(budget, 2);
+    return {};
+  }
 
   let target = node as Record<string, unknown>;
   const ref = typeof target.$ref === 'string' ? target.$ref : undefined;
   let chain = refChain;
   if (ref) {
-    if (refChain.has(ref)) return {};
+    if (refChain.has(ref)) {
+      charge(budget, 2);
+      return {};
+    }
     const resolved = resolveDocRef(target) as Record<string, unknown>;
-    if (resolved === target) return {};
+    if (resolved === target) {
+      charge(budget, 2);
+      return {};
+    }
     chain = new Set(refChain);
     chain.add(ref);
     target = resolved;
   }
 
+  charge(budget, 2); // braces
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(target)) {
-    if (key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') {
-      continue;
-    }
-    out[key] = dereferenceSchema(value, chain);
+  let first = true;
+  // Do not materialize Object.entries(target): components may have thousands
+  // of properties, most of which we will never need to visit.
+  for (const key in target) {
+    if (!Object.hasOwn(target, key) || key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') continue;
+    charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
+    first = false;
+    out[key] = dereferenceSchema(target[key], chain, budget, depth + 1);
   }
   if (target.nullable === true && typeof out.type === 'string') {
-    out.type = [out.type, 'null'];
+    // Replace the already-counted scalar type with its union representation.
+    const nullableType = [out.type, 'null'];
+    charge(budget, JSON.stringify(nullableType).length - JSON.stringify(out.type).length);
+    out.type = nullableType;
   }
   return out;
 }
@@ -156,7 +206,12 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
     if (!mediaType) continue;
     const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
     if (schema && typeof schema === 'object' && Object.keys(schema).length > 0) {
-      return dereferenceSchema(schema, new Set()) as Record<string, unknown>;
+      try {
+        return dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof SchemaTooLarge) return undefined;
+        throw error;
+      }
     }
   }
   return undefined;
