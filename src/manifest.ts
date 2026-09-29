@@ -284,17 +284,25 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   const shapes: Record<string, unknown>[] = [];
   for (const code of codes) {
     const content = op.responses[code]?.content ?? {};
-    // Only explicit JSON media commits to a JSON response body (#65). A
-    // wildcard `* /*` entry (swagger2openapi's fill-in for 2.0 operations
-    // without produces) declares no such commitment: the API may validly
-    // answer text, and advertising a schema would reject that valid
-    // response. Wildcard statuses are skipped like schema-less ones.
-    const mediaType = Object.keys(content).includes('application/json')
+    // Every declared successful representation must be able to satisfy the
+    // advertised schema (#72), across statuses and media alternatives:
+    // - a bodyless success (204 No Content) returns no structured content;
+    // - a status committed to non-JSON media (or wildcard `* /*`, which
+    //   declares no commitment - #65) can validly answer non-JSON;
+    // - a JSON media alternative without a schema admits any shape;
+    // - a non-JSON media alternative alongside JSON can be the actual
+    //   response while the schema describes only the JSON one.
+    // In each case advertising would reject a valid success, so the tool
+    // stays text-only.
+    const mediaTypes = Object.keys(content);
+    if (mediaTypes.length === 0) return undefined;
+    const mediaType = mediaTypes.includes('application/json')
       ? 'application/json'
-      : Object.keys(content).find((m) => m.toLowerCase().includes('json'));
-    if (!mediaType) continue;
+      : mediaTypes.find((m) => m.toLowerCase().includes('json'));
+    if (!mediaType) return undefined;
+    if (mediaTypes.some((m) => m !== mediaType && !m.toLowerCase().includes('json'))) return undefined;
     const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
-    if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) continue;
+    if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) return undefined;
     let dereferenced: Record<string, unknown>;
     try {
       dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;

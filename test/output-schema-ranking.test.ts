@@ -60,6 +60,26 @@ test('#61 same shape across 200 and 201 is advertised', async () => {
         responses: {
           '200': { description: 'ok', content: { 'application/json': { schema: shape } } },
           '201': { description: 'created', content: { 'application/json': { schema: shape } } },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  // #72: a bodiless success status alongside these would force text-only
+  // (see the 204 case below); with every success carrying the same JSON
+  // shape, advertising is honest.
+  assert.equal(m.tools[0]?.outputSchema?.type, 'object', 'one shared shape across every success status');
+});
+
+test('#72 a bodyless success status forces text-only', async () => {
+  const shape = { type: 'object', properties: { id: { type: 'string' } } };
+  const d = doc({
+    '/things': {
+      post: {
+        operationId: 'makeThing',
+        responses: {
+          '200': { description: 'ok', content: { 'application/json': { schema: shape } } },
           '204': { description: 'no body' },
         },
       },
@@ -67,7 +87,55 @@ test('#61 same shape across 200 and 201 is advertised', async () => {
   });
   await init(d);
   const m = buildManifest(d);
-  assert.equal(m.tools[0]?.outputSchema?.type, 'object', 'one shared shape, bodiless statuses skipped');
+  // A valid 204 returns no structured content; advertising the 200 shape
+  // would mark that empty success isError.
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'a valid empty 204 must not be validated against the 200 shape');
+});
+
+test('#72 a schema-less JSON success status forces text-only', async () => {
+  const d = doc({
+    '/things': {
+      post: {
+        operationId: 'makeThing',
+        responses: {
+          '200': {
+            description: 'ok',
+            content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } } },
+          },
+          '202': { description: 'accepted, shape unspecified', content: { 'application/json': {} } },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  // The 202 JSON alternative admits any shape; a valid 202 must not be
+  // rejected against the 200 schema.
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'schema-less JSON success admits any shape');
+});
+
+test('#72 a non-JSON media alternative forces text-only', async () => {
+  const d = doc({
+    '/thing': {
+      get: {
+        operationId: 'getThing',
+        responses: {
+          '200': {
+            description: 'json or xml',
+            content: {
+              'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } },
+              'application/xml': { schema: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  // The API may validly answer XML; advertising the JSON schema would
+  // reject that valid non-JSON success.
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'a valid non-JSON alternative must not be rejected');
 });
 
 test('#61 differing success shapes advertise no outputSchema', async () => {
