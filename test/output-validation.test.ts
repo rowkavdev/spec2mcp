@@ -1,6 +1,6 @@
 /**
- * Unit tests for the runtime's compiled outputSchema validators: the closure
- * tree that checks candidate structuredContent before it is attached to a
+ * Unit tests for the runtime's compiled SDK outputSchema validators, checking
+ * candidate structuredContent before it is attached to a
  * tools/call result. MCP SDK clients hard-error a result whose
  * structuredContent fails the advertised outputSchema, so a drifted API
  * response must be caught here.
@@ -46,7 +46,8 @@ test('drifted responses fail validation', () => {
 
 test('integer formats bound the value range', () => {
   const validate = compileOutputValidator(PET_SCHEMA);
-  assert.equal(validate({ id: Number.MAX_SAFE_INTEGER + 1, name: 'Rex' }), false, 'int64 rejects unsafe integers');
+  assert.equal(validate({ id: Number.MAX_SAFE_INTEGER + 1, name: 'Rex' }), true, 'SDK int64 accepts integers beyond JS safe range');
+  assert.equal(validate({ id: 2 ** 64, name: 'Rex' }), true, 'SDK int64 format does not impose the former safe-integer cap');
   const int32 = compileOutputValidator({ type: 'integer', format: 'int32' });
   assert.equal(int32(2 ** 31 - 1), true);
   assert.equal(int32(2 ** 31), false);
@@ -114,19 +115,32 @@ test('combinators are honoured', () => {
   assert.equal(not('x'), false);
 });
 
-test('non-schema input compiles to pass-through instead of throwing', () => {
-  for (const schema of [null, undefined, 42, 'nope', [], { type: 7 }]) {
-    const validate = compileOutputValidator(schema);
-    assert.equal(validate({ anything: true }), true, JSON.stringify(schema));
-    assert.equal(validate(null), true, JSON.stringify(schema));
+test('invalid schemas do not silently compile to pass-through', () => {
+  for (const schema of [null, undefined, 42, 'nope', { type: 7 }]) {
+    assert.throws(() => compileOutputValidator(schema));
   }
 });
 
-test('schemas nested beyond the depth cap degrade to pass-through', () => {
+test('deep schemas are fully validated rather than bypassed', () => {
   let schema: Record<string, unknown> = { type: 'string' };
   for (let i = 0; i < 40; i++) schema = { type: 'object', properties: { next: schema }, required: ['next'] };
   const validate = compileOutputValidator(schema);
   let value: Record<string, unknown> = { next: 42 };
   for (let i = 0; i < 40; i++) value = { next: value };
-  assert.equal(validate(value), true, 'deep subtrees are not validated, but nothing throws');
+  assert.equal(validate(value), false);
+});
+
+test('SDK parity for date-time offsets, time zones, email, Unicode length and uniqueItems', () => {
+  const corpus: { schema: unknown; valid: unknown; invalid: unknown }[] = [
+    { schema: { type: 'string', format: 'date-time' }, valid: '2026-09-29T12:00:00+01:00', invalid: '2026-09-29T12:00:00+99:99' },
+    { schema: { type: 'string', format: 'time' }, valid: '12:00:00Z', invalid: '12:00:00' },
+    { schema: { type: 'string', format: 'email' }, valid: 'a.b@example.com', invalid: 'a..b@example.com' },
+    { schema: { type: 'string', minLength: 2 }, valid: 'a😀', invalid: '😀' },
+    { schema: { type: 'array', uniqueItems: true }, valid: [{ a: 1 }, { a: 2 }], invalid: [{ a: 1, b: 2 }, { b: 2, a: 1 }] },
+  ];
+  for (const { schema, valid, invalid } of corpus) {
+    const validate = compileOutputValidator(schema);
+    assert.equal(validate(valid), true, `accept ${JSON.stringify(valid)}`);
+    assert.equal(validate(invalid), false, `reject ${JSON.stringify(invalid)}`);
+  }
 });
