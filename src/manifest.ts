@@ -424,6 +424,12 @@ function schemaAdmitsNonObjectRoot(schema: Record<string, unknown>, seen = new S
     return schema.allOf.every((branch) => schemaAdmitsNonObjectRoot(branch as Record<string, unknown>, seen));
   }
   if ('not' in schema) return true;
+  // Typeless object keywords keep the OpenAPI object intent (#111, a
+  // deliberate recorded decision): strict JSON Schema 2020-12 admits
+  // scalar roots against `{properties: ...}` (properties only constrains
+  // objects), and 3.1 specs are 2020-12 - but the 3.0 idiom and every
+  // real-world spec mean an object here. Rewrapping the idiom would churn
+  // contracts for no real API; docs/guide.md records the caveat.
   if ('properties' in schema || 'required' in schema) return false;
   return true;
 }

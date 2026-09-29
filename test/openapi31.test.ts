@@ -273,3 +273,19 @@ test('#107 a constrained non-object oneOf branch wraps structurally', async () =
   assert.equal(validate({ result: { id: 'f' } }), true, 'valid root object');
   assert.equal(validate({ result: [] }), false, 'constraint still enforced under the wrap');
 });
+
+test('#111 the typeless object idiom keeps the OpenAPI object intent', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const showTurtle = m.tools.find((t) => t.name === 'show_turtle');
+  assert.ok(showTurtle);
+  // Recorded decision (#111): `{properties: ...}` without a type means an
+  // object, even though strict 2020-12 admits scalar roots. It advertises
+  // directly instead of rewrapping the idiom.
+  assert.equal(showTurtle.outputWrap, undefined, 'no rewrap of the typeless idiom');
+  assert.equal(showTurtle.outputSchema?.type, 'object');
+  const props = showTurtle.outputSchema?.properties as Record<string, Record<string, unknown>>;
+  assert.equal(props.id?.type, 'string');
+});

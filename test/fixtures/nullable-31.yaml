@@ -161,3 +161,16 @@ paths:
                     minItems: 2
                     items:
                       type: string
+  /turtles:
+    get:
+      operationId: showTurtle
+      responses:
+        '200':
+          description: OK - typeless object idiom
+          content:
+            application/json:
+              schema:
+                required: [id]
+                properties:
+                  id:
+                    type: string
