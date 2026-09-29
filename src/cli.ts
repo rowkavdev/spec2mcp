@@ -9,7 +9,9 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { init } from '../vendor/forge/index.js';
-import { loadSpec } from './load.js';
+import { applyOverlays } from './overlay.js';
+import { loadOverlays, loadSpec } from './load.js';
+import type { OpenAPIV3 } from 'openapi-types';
 import { buildManifest, DEFAULT_31_DIALECT } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
 import { watchSpec } from './watch.js';
@@ -32,6 +34,8 @@ Options:
   -o, --out <dir>                      Output directory (generate; default: ./<name>-mcp)
       --name <name>                    Server name (default: derived from the spec title)
       --base-url <url>                 Override the API base URL from the spec's servers list
+      --env-prefix <prefix>            Override the auth environment variable prefix
+      --overlay <file>                 Apply an OpenAPI Overlay before generating (repeatable)
       --watch                          Regenerate when the spec changes (generate only)
       --poll-interval <seconds>        URL polling period with --watch (default: 30)
       --transport <stdio|http>         Transport (serve; default: stdio)
@@ -57,13 +61,20 @@ async function runtimeSource(): Promise<string> {
   return readFile(new URL('../runtime/server.mjs', import.meta.url), 'utf8');
 }
 
+async function loadEffectiveSpec(spec: string, overlayPaths: string[]): Promise<OpenAPIV3.Document> {
+  let doc = await loadSpec(spec);
+  const overlays = await loadOverlays(overlayPaths);
+  if (overlays.length > 0) doc = applyOverlays(doc, overlays);
+  return doc;
+}
+
 async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }, config: ProjectConfig): Promise<void> {
-  const doc = await loadSpec(spec);
+  const doc = await loadEffectiveSpec(spec, config.overlays ?? []);
   const forge = await init(doc);
-  const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, include: flags.include, exclude: flags.exclude });
+  const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
-  const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { ...config, name: probe.serverName, baseUrl: probe.baseUrl }, runtimeSource: await runtimeSource() }));
+  const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
   await forge.finalize(outDir, files, { clean: true });
   const toolCount = JSON.parse(files.find((f) => f.path === 'operations.json')?.content ?? '{}').tools?.length ?? 0;
   console.log(`Generated ${toolCount} tools in ${outDir}`);
@@ -82,10 +93,10 @@ async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string
   }
 }
 
-async function cmdServe(spec: string, flags: ManifestOptions & { name?: string; transport?: string; port?: string }): Promise<void> {
-  const doc = await loadSpec(spec);
+async function cmdServe(spec: string, flags: ManifestOptions & { name?: string; transport?: string; port?: string }, config: ProjectConfig): Promise<void> {
+  const doc = await loadEffectiveSpec(spec, config.overlays ?? []);
   await init(doc);
-  const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, include: flags.include, exclude: flags.exclude });
+  const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of manifest.auth.warnings) console.error(`warning: ${warning}`);
   const runtimeUrl = new URL('../runtime/server.mjs', import.meta.url).href;
   const runtime = (await import(runtimeUrl)) as {
@@ -123,6 +134,8 @@ async function main(): Promise<void> {
       'poll-interval': { type: 'string' },
       transport: { type: 'string' },
       port: { type: 'string' },
+      'env-prefix': { type: 'string' },
+      overlay: { type: 'string', multiple: true },
       include: { type: 'string', multiple: true },
       exclude: { type: 'string', multiple: true },
       config: { type: 'string' },
@@ -140,8 +153,8 @@ async function main(): Promise<void> {
   }
   const spec = positionals[0];
   if (!spec) fail(`missing <spec> argument\n\n${HELP}`);
-  const { options, config } = resolveConfig(await readProjectConfig(values.config), { name: values.name, baseUrl: values['base-url'], include: values.include, exclude: values.exclude });
-  const flags = { out: values.out, name: options.serverName, baseUrl: options.baseUrl, transport: values.transport, port: values.port, include: options.include, exclude: options.exclude };
+  const { options, config } = resolveConfig(await readProjectConfig(values.config), { name: values.name, baseUrl: values['base-url'], envPrefix: values['env-prefix'], overlays: values.overlay, include: values.include, exclude: values.exclude });
+  const flags = { out: values.out, name: options.serverName, baseUrl: options.baseUrl, envPrefix: options.envPrefix, transport: values.transport, port: values.port, include: options.include, exclude: options.exclude };
   if (flags.transport && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
   if (command !== 'serve' && (flags.transport || flags.port)) fail('--transport and --port are only valid with serve');
   if (flags.port && (flags.transport !== 'http' || !/^(0|[1-9][0-9]*)$/.test(flags.port) || Number(flags.port) > 65535)) {
@@ -159,7 +172,7 @@ async function main(): Promise<void> {
     process.once('SIGINT', () => { handle.close(); process.exit(0); });
     process.once('SIGTERM', () => { handle.close(); process.exit(0); });
   } else if (command === 'serve') {
-    await cmdServe(spec, flags);
+    await cmdServe(spec, flags, config);
   } else {
     await cmdGenerate(spec, flags, config);
   }

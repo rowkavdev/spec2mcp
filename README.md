@@ -138,7 +138,7 @@ Auth comes from the spec's `securitySchemes`; the server reads secrets from envi
 
 Each tool uses its operation-level `security` when present, otherwise the root requirement. An explicit `security: []` sends no credentials. The first fully mapped OR alternative is selected when available (its schemes are combined as AND); a missing or unsupported scheme produces a generation-time warning and uses the sole supported scheme as a fallback if one exists, otherwise continues without that scheme.
 
-Env var names are derived from the API title and scheme name, e.g. `PET_STORE_BEARER_AUTH`. The generated `.env.example` lists them all. `<PREFIX>_BASE_URL` overrides the spec's server URL, so one generated server can point at staging or prod without regenerating.
+Env var names are derived from the API title and scheme name, e.g. `PET_STORE_BEARER_AUTH`. When the title's suffix already matches the scheme name, the overlap is collapsed (`CLOUDFLARE_API` + `API_TOKEN` becomes `CLOUDFLARE_API_TOKEN`). Set a fixed prefix with `--env-prefix MYAPI` (or `"envPrefix"` in config) for stable names regardless of the spec's title. The generated `.env.example` lists them all. `<PREFIX>_BASE_URL` overrides the spec's server URL, so one generated server can point at staging or prod without regenerating.
 
 ## vs Cloudflare Code Mode
 
