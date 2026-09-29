@@ -249,7 +249,13 @@ async function executeTool(manifest, tool, args, validateOutput) {
     const value = args[arg.name];
     if (value === undefined) continue;
     if (arg.location === 'path') {
-      path = path.replace(`{${arg.apiName ?? arg.name}}`, encodeURIComponent(String(value)));
+      const segment = String(value);
+      // WHATWG URL normalizes . and .. even when percent-encoded, which
+      // would route a request to a different endpoint than the declared tool.
+      if (segment === '.' || segment === '..') {
+        return errorResult(`Invalid path argument "${arg.name}": dot segments are not allowed.`);
+      }
+      path = path.replace(`{${arg.apiName ?? arg.name}}`, encodeURIComponent(segment));
     }
   }
   let url;
