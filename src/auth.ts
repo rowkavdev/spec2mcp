@@ -72,6 +72,24 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
       if (scheme) mapped.set(name, scheme);
     }
   }
+  // Two scheme names can normalize to the same env var ("api-key" and
+  // "api_key" both become API_KEY): one shared variable sends the same
+  // secret to both headers with no way to configure them independently
+  // (#101). Suffix colliding variables deterministically (byte order by
+  // scheme name) so the generated instructions and the runtime agree.
+  const byEnvVar = new Map<string, string[]>();
+  for (const [name, scheme] of mapped) {
+    const list = byEnvVar.get(scheme.envVar) ?? [];
+    list.push(name);
+    byEnvVar.set(scheme.envVar, list);
+  }
+  for (const names of byEnvVar.values()) {
+    if (names.length < 2) continue;
+    names.sort();
+    names.forEach((name, index) => {
+      if (index > 0) mapped.get(name)!.envVar = `${mapped.get(name)!.envVar}_${index + 1}`;
+    });
+  }
   const auth: AuthPlan = { schemes: [], warnings: [], baseUrlEnvVar: `${envPrefix}_BASE_URL` };
   const used = new Set<string>();
   const fallback = mapped.size === 1 ? [...mapped.keys()][0] : undefined;
