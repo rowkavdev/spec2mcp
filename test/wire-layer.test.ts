@@ -59,6 +59,8 @@ before(async () => {
       tool('plain', 'POST', [bodyArg()], 'text/plain'),
       tool('optional', 'POST', [{ name: 'name', location: 'body', apiFieldPath: ['name'], required: false, schema: { type: 'string' } }], 'application/json'),
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
+      tool('jsonString', 'POST', [bodyArg()], 'application/json'),
+      tool('vendorJsonString', 'POST', [bodyArg()], 'application/vnd.test+json'),
     ],
   };
   await mkdir(OUT, { recursive: true });
@@ -130,4 +132,16 @@ test('#68 base URL query stays a query while endpoint path appends to path', asy
   assert.equal(url.pathname, '/api/blob');
   assert.equal(url.searchParams.get('tenant'), 'customer');
   assert.equal(url.searchParams.get('api_key'), credential);
+});
+
+test('#73 JSON top-level strings are quoted, including +json; text bodies stay raw', async () => {
+  for (const name of ['jsonString', 'vendorJsonString']) {
+    const result = await call(name, { body: 'hello' });
+    assert.equal(result.isError, undefined);
+    assert.equal(seen.at(-1)!.body.toString('utf8'), '"hello"');
+    assert.equal(JSON.parse(seen.at(-1)!.body.toString('utf8')), 'hello');
+  }
+  const plain = await call('plain', { body: 'hello' });
+  assert.equal(plain.isError, undefined);
+  assert.equal(seen.at(-1)!.body.toString('utf8'), 'hello');
 });
