@@ -11,9 +11,12 @@
  * IMPORTANT: stdout is the MCP protocol channel. Never write logs to stdout.
  */
 import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -159,7 +162,7 @@ async function executeTool(manifest, tool, args) {
   return textResult(rendered.length > 0 ? rendered : `(empty response, HTTP ${res.status})`);
 }
 
-export async function runServer(manifest) {
+function createMcpServer(manifest) {
   const server = new Server(
     { name: manifest.serverName, version: manifest.apiVersion },
     { capabilities: { tools: {} } },
@@ -181,18 +184,115 @@ export async function runServer(manifest) {
     return executeTool(manifest, tool, request.params.arguments ?? {});
   });
 
+  return server;
+}
+
+export async function runServer(manifest) {
+  const server = createMcpServer(manifest);
+  warnUnsetAuth(manifest);
+  await server.connect(new StdioServerTransport());
+  console.error(`${manifest.serverName}: ${manifest.tools.length} tools from ${manifest.apiTitle} ${manifest.apiVersion} - MCP server running on stdio`);
+}
+
+function warnUnsetAuth(manifest) {
   const unset = (manifest.auth?.schemes ?? []).filter((s) => !process.env[s.envVar]).map((s) => s.envVar);
   if (unset.length > 0) {
     console.error(`${manifest.serverName}: auth env var(s) not set: ${unset.join(', ')} - calls proceed anonymously; the API will 401 if it requires them`);
   }
+}
 
-  await server.connect(new StdioServerTransport());
-  console.error(`${manifest.serverName}: ${manifest.tools.length} tools from ${manifest.apiTitle} ${manifest.apiVersion} - MCP server running on stdio`);
+/** Localhost-only Streamable HTTP endpoint. Each client gets its own MCP server
+ * and session; the SDK handles POST responses, GET SSE streams and DELETE. */
+export async function runHttpServer(manifest, { port = 3000 } = {}) {
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error('HTTP port must be an integer between 0 and 65535');
+  }
+  warnUnsetAuth(manifest);
+  const sessions = new Map();
+  const httpServer = createServer(async (req, res) => {
+    // Reject other hosts even on loopback: browsers can reach localhost via DNS rebinding.
+    const host = req.headers.host;
+    const boundPort = httpServer.address().port;
+    if (host !== `127.0.0.1:${boundPort}` && host !== `localhost:${boundPort}` && host !== `[::1]:${boundPort}`) {
+      res.writeHead(403).end('Forbidden');
+      return;
+    }
+    const origin = req.headers.origin;
+    if (origin && ![`http://127.0.0.1:${boundPort}`, `http://localhost:${boundPort}`, `http://[::1]:${boundPort}`].includes(origin)) {
+      res.writeHead(403).end('Forbidden');
+      return;
+    }
+    if (req.url !== '/mcp') {
+      res.writeHead(404).end('Not found');
+      return;
+    }
+    if (!['POST', 'GET', 'DELETE'].includes(req.method)) {
+      res.writeHead(405, { Allow: 'POST, GET, DELETE' }).end();
+      return;
+    }
+    const id = req.headers['mcp-session-id'];
+    let entry = typeof id === 'string' ? sessions.get(id) : undefined;
+    if (id && !entry) {
+      res.writeHead(404).end('Unknown MCP session');
+      return;
+    }
+    if (!entry && req.method !== 'POST') {
+      res.writeHead(400).end('MCP session required');
+      return;
+    }
+    if (!entry) {
+      const server = createMcpServer(manifest);
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: randomUUID,
+        onsessioninitialized: (sessionId) => sessions.set(sessionId, { server, transport }),
+        onsessionclosed: (sessionId) => sessions.delete(sessionId),
+      });
+      transport.onclose = () => {
+        if (transport.sessionId) sessions.delete(transport.sessionId);
+      };
+      entry = { server, transport };
+      try {
+        await server.connect(transport);
+      } catch (err) {
+        console.error('MCP session setup failed:', err);
+        res.writeHead(500).end('MCP session setup failed');
+        return;
+      }
+    }
+    try {
+      await entry.transport.handleRequest(req, res);
+      if (!entry.transport.sessionId) await entry.server.close();
+    } catch (err) {
+      console.error('MCP HTTP request failed:', err);
+      if (!res.headersSent) res.writeHead(500).end('MCP request failed');
+      else res.end();
+      if (entry.transport.sessionId) sessions.delete(entry.transport.sessionId);
+      await entry.server.close();
+    }
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(port, '127.0.0.1', resolve);
+    });
+  } catch (err) {
+    httpServer.close();
+    throw err;
+  }
+  console.error(`${manifest.serverName}: ${manifest.tools.length} tools - Streamable HTTP listening at http://127.0.0.1:${httpServer.address().port}/mcp`);
+  return httpServer;
 }
 
 // Executed directly (generated project): load the sibling manifest and run.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const manifestUrl = new URL('./operations.json', import.meta.url);
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
-  await runServer(manifest);
+  const args = process.argv.slice(2);
+  if (args[0] === '--transport' && args[1] === 'http' && args.length === 2) {
+    await runHttpServer(manifest, { port: Number(process.env.PORT || '3000') });
+  } else if (args.length === 0 || (args[0] === '--transport' && args[1] === 'stdio' && args.length === 2)) {
+    await runServer(manifest);
+  } else {
+    throw new Error('Usage: node server.mjs [--transport stdio|http] (HTTP port: PORT env var)');
+  }
 }
