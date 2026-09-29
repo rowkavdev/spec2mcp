@@ -13,3 +13,10 @@ the desired full upstream commit, replace this package source from
 `packages/forge` (excluding tests), copy the upstream Apache-2.0 LICENSE,
 update the pinned commit here, and run typecheck, build, and tests. Review the
 vendored diff before committing; keep attribution and the license.
+
+## Deviations from verbatim
+
+- openapi-resolver.ts: additively carries the OpenAPI `allowReserved`
+  parameter flag through Parameter -> ParameterInfo (3 interface fields +
+  1 extraction line, no behavior change to existing paths), for #108.
+  Applied 2026-09-29; drop if upstream adopts the same carry.
