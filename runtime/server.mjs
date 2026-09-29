@@ -457,7 +457,7 @@ function compileSchemaNode(schema, depth) {
 
 export { compileOutputValidator };
 
-async function executeTool(manifest, tool, args) {
+async function executeTool(manifest, tool, args, validateOutput) {
   const missing = tool.args.filter((a) => a.required && args[a.name] === undefined).map((a) => a.name);
   if (missing.length > 0) {
     return errorResult(`Missing required argument(s): ${missing.join(', ')}`);
@@ -596,6 +596,10 @@ async function executeTool(manifest, tool, args) {
         structured = parsed;
       }
     }
+    if (structured && validateOutput && !validateOutput(structured)) {
+      console.error(`${manifest.serverName}: ${tool.name}: response does not match its outputSchema; returning text-only`);
+      structured = undefined;
+    }
     if (structured) result.structuredContent = structured;
   }
   return result;
@@ -645,6 +649,13 @@ function createMcpServer(manifest) {
   );
 
   const byName = new Map(manifest.tools.map((t) => [t.name, t]));
+  // Compile outputSchema validators once at server start: the manifest's
+  // schemas are already dereferenced and size-capped at generation time, so
+  // call-time validation is plain closures over the response payload.
+  const outputValidators = new Map();
+  for (const tool of manifest.tools) {
+    if (tool.outputSchema) outputValidators.set(tool.name, compileOutputValidator(tool.outputSchema));
+  }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: manifest.tools.map((t) => ({
@@ -658,7 +669,7 @@ function createMcpServer(manifest) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) return errorResult(`Unknown tool: ${request.params.name}`);
-    return executeTool(manifest, tool, request.params.arguments ?? {});
+    return executeTool(manifest, tool, request.params.arguments ?? {}, outputValidators.get(request.params.name));
   });
 
   return server;
