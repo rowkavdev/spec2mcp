@@ -1,0 +1,8 @@
+Widget:
+  type: object
+  required: [name]
+  properties:
+    name:
+      type: string
+    size:
+      type: integer

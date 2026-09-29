@@ -36,11 +36,18 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   let convertedFromSwagger2 = false;
   if (!('openapi' in raw)) {
     if ((raw as Record<string, unknown>).swagger === '2.0') {
-      // Swagger 2.0: convert in memory, then run the same pipeline. Servers
-      // come from host/basePath/schemes and securityDefinitions become
-      // components.securitySchemes, so auth and base URL handling are
-      // unchanged.
-      const { openapi } = await convertSwagger2(raw as never, { patch: true, warnOnly: true } as never);
+      // Swagger 2.0: bundle external $refs from the original path/URL
+      // FIRST so sibling refs ("./defs.yaml") resolve against the spec's
+      // own location - after conversion the document only exists in
+      // memory, where bundling would resolve against the process cwd
+      // and ENOENT. Then convert to 3.x and run the same pipeline.
+      // Servers come from host/basePath/schemes and securityDefinitions
+      // become components.securitySchemes, so auth and base URL handling
+      // are unchanged.
+      const bundled2 = await $RefParser.bundle(input as never, {
+        dereference: { circular: 'ignore' },
+      });
+      const { openapi } = await convertSwagger2(bundled2 as never, { patch: true, warnOnly: true } as never);
       raw = openapi;
       convertedFromSwagger2 = true;
     } else {
