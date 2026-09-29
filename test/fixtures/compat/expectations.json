@@ -32,6 +32,22 @@
       "url": "https://openapi.vercel.sh/",
       "openapi": "3.0.3",
       "tools": 431
+    },
+    {
+      "id": "discord",
+      "title": "Discord HTTP API (Preview)",
+      "file": "discord.json",
+      "url": "https://raw.githubusercontent.com/discord/discord-api-spec/main/specs/openapi.json",
+      "openapi": "3.1.0",
+      "tools": 246
+    },
+    {
+      "id": "slack",
+      "title": "Slack Web API",
+      "file": "slack.json",
+      "url": "https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json",
+      "openapi": "3.0.0",
+      "tools": 174
     }
   ]
 }

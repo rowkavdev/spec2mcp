@@ -86,9 +86,8 @@ Auth comes from the spec's security schemes. The generated `.env.example` names 
 | --- | --- | --- |
 | GitHub REST | 1,231 generated tools | Project installed; MCP stdio client invoked `repos_get` against live `api.github.com`. Reproduce with `node examples/live-github.mjs`. |
 | Cloudflare API | 3,469 generated tools | Generation from its public spec (2,185 paths, about 26 MB); `api_token` bearer scheme mapped. |
-| Stripe, Kubernetes (core/v1), Spotify, Vercel | 612 / 236 / 96 / 431 tools | Pinned snapshots verified in CI by the compat matrix (`test/compat.test.ts`), including tool shape and full project emission. Refresh from live sources with `npm run compat:refresh`. |
+| Stripe, Kubernetes (core/v1), Spotify, Vercel, Discord, Slack | 612 / 236 / 96 / 431 / 246 / 174 tools | Pinned snapshots verified in CI by the compat matrix (`test/compat.test.ts`), including tool shape and full project emission. Slack's snapshot is Swagger 2.0, pinning the 2.0 conversion path end to end. Refresh from live sources with `npm run compat:refresh`. |
 | Kubernetes aggregated Swagger 2.0 | 1,190 tools | 2.0 spec converted to 3.x in memory at load; pinned fixture test. |
-| Discord | 246 tools | Generation from the official spec; bot token and OAuth2 schemes mapped. |
 
 Those counts reflect the specs tested, not a guarantee that all later versions generate identical tools or that every endpoint was called. OpenAPI 3.1 input is covered by a fixture, but webhooks are not inbound MCP tools and some 3.1 schema features may not translate exactly. Swagger 2.0 inputs convert at load; 2.0 specs with external `$ref`s relative to the spec's own location are unsupported (the converted document exists only in memory). [Compatibility table](docs/guide.md#compatibility-and-limits).
 

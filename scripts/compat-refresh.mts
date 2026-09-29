@@ -55,6 +55,20 @@ const SPECS: SpecSource[] = [
     url: 'https://openapi.vercel.sh/',
     format: 'json',
   },
+  {
+    id: 'discord',
+    file: 'discord.json',
+    url: 'https://raw.githubusercontent.com/discord/discord-api-spec/main/specs/openapi.json',
+    format: 'json',
+  },
+  {
+    id: 'slack',
+    // Slack publishes Swagger 2.0 only; the snapshot pins the 2.0
+    // conversion path end to end (expectations record the converted 3.x).
+    file: 'slack.json',
+    url: 'https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json',
+    format: 'json',
+  },
 ];
 
 async function fetchText(url: string): Promise<string> {
