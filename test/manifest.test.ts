@@ -185,3 +185,56 @@ test('operations without a declared JSON response schema stay text-only', async 
     assert.equal(tool?.outputWrap, undefined);
   }
 });
+
+const MEDIA = fileURLToPath(new URL('./fixtures/media.yaml', import.meta.url));
+
+test('multipart bodies become per-field args, files marked binary', async () => {
+  const doc = await loadSpec(MEDIA);
+  await init(doc);
+  const m = buildManifest(doc);
+  const upload = m.tools.find((t) => t.name === 'upload_pet_photo');
+  assert.ok(upload);
+  assert.equal(upload.contentType, 'multipart/form-data');
+
+  const photo = upload.args.find((a) => a.name === 'photo');
+  assert.equal(photo?.location, 'body');
+  assert.equal(photo?.binary, true);
+  assert.equal(photo?.required, true);
+  assert.equal(photo?.schema.type, 'object');
+  assert.deepEqual(photo?.schema.required, ['contentBase64']);
+  const photoProps = photo?.schema.properties as Record<string, Record<string, unknown>>;
+  assert.ok(photoProps.contentBase64);
+  assert.ok(photoProps.filename);
+  assert.ok(photoProps.mimeType);
+
+  const caption = upload.args.find((a) => a.name === 'caption');
+  assert.equal(caption?.binary, undefined);
+  assert.equal(caption?.schema.type, 'string');
+  assert.equal(caption?.required, false);
+  const isPublic = upload.args.find((a) => a.name === 'isPublic');
+  assert.equal(isPublic?.schema.type, 'boolean');
+  const labels = upload.args.find((a) => a.name === 'labels');
+  assert.equal(labels?.schema.type, 'array');
+  const metadata = upload.args.find((a) => a.name === 'metadata');
+  assert.equal(metadata?.schema.type, 'object');
+
+  assert.deepEqual(upload.inputSchema.required, ['petId', 'photo']);
+});
+
+test('tools record their declared success response content types', async () => {
+  const doc = await loadSpec(MEDIA);
+  await init(doc);
+  const m = buildManifest(doc);
+  assert.deepEqual(m.tools.find((t) => t.name === 'get_pet_photo')?.responseContentTypes, ['image/png']);
+  assert.deepEqual(m.tools.find((t) => t.name === 'get_pet_records')?.responseContentTypes, ['application/pdf']);
+  assert.deepEqual(m.tools.find((t) => t.name === 'export_pets')?.responseContentTypes, ['text/csv']);
+  assert.deepEqual(m.tools.find((t) => t.name === 'upload_pet_photo')?.responseContentTypes, ['application/json']);
+});
+
+test('operations with undeclared response bodies have no response content types', async () => {
+  const doc = await loadSpec(PETSTORE);
+  await init(doc);
+  const m = buildManifest(doc);
+  const getPet = m.tools.find((t) => t.name === 'get_legacy');
+  assert.equal(getPet?.responseContentTypes, undefined);
+});

@@ -9,6 +9,7 @@ import {
   getAllOperationIds,
   resolveOperation,
   resolveDocRef,
+  type MultipartField,
   type OperationInfo,
   type ParameterInfo,
 } from '../vendor/forge/index.js';
@@ -22,6 +23,8 @@ export type ToolArg = {
   location: 'path' | 'query' | 'header' | 'body';
   /** For body args: path of API field names for nested body reconstruction. */
   apiFieldPath?: string[];
+  /** True for multipart/form-data fields carrying file content (format: binary). */
+  binary?: boolean;
   required: boolean;
   schema: Record<string, unknown>;
 };
@@ -49,6 +52,8 @@ export type ToolDef = {
    * structuredContent to satisfy MCP's object requirement.
    */
   outputWrap?: boolean;
+  /** Declared success (2xx/default) response content types, used for the Accept header. */
+  responseContentTypes?: string[];
   args: ToolArg[];
   inputSchema: Record<string, unknown>;
   /** Names of schemes used by this operation; [] explicitly sends no auth. */
@@ -165,6 +170,55 @@ function schemaIsObject(schema: Record<string, unknown>): boolean {
   return true;
 }
 
+/**
+ * One multipart/form-data field becomes one tool argument. Binary (file)
+ * fields take an object with the base64-encoded content plus an optional
+ * filename and MIME type; the runtime turns it into a FormData file part.
+ * Scalar fields are appended as form fields, object/array fields as JSON.
+ */
+function multipartFieldArg(field: MultipartField): ToolArg {
+  if (field.isBinary) {
+    return {
+      name: field.name,
+      location: 'body',
+      binary: true,
+      required: field.required,
+      schema: {
+        type: 'object',
+        description: `${field.description} File upload.`,
+        properties: {
+          contentBase64: { type: 'string', description: 'Base64-encoded file content.' },
+          filename: { type: 'string', description: `File name sent to the API (default: "${field.name}").` },
+          mimeType: { type: 'string', description: 'File MIME type (default: application/octet-stream).' },
+        },
+        required: ['contentBase64'],
+        additionalProperties: false,
+      },
+    };
+  }
+  const schema: Record<string, unknown> = { description: field.description };
+  if (field.type === 'object') {
+    schema.type = 'object';
+    schema.additionalProperties = true;
+  } else if (field.type === 'array') {
+    schema.type = 'array';
+    schema.items = {};
+  } else {
+    schema.type = field.type;
+  }
+  return { name: field.name, location: 'body', required: field.required, schema };
+}
+
+/** Content types declared on success (2xx or default) responses, in spec order. */
+function collectResponseContentTypes(op: OperationInfo): string[] {
+  const seen = new Set<string>();
+  for (const [status, info] of Object.entries(op.responses)) {
+    if (!status.startsWith('2') && status !== 'default') continue;
+    for (const contentType of Object.keys(info.content)) seen.add(contentType);
+  }
+  return [...seen];
+}
+
 export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {}): Manifest {
   const info = doc.info ?? ({ title: 'API', version: '0.0.0' } as OpenAPIV3.Document['info']);
   const apiTitle = info.title ?? 'API';
@@ -196,6 +250,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       args.push({ name: p.name, location: 'header', required: p.required, schema: argSchema(p) });
     }
 
+    const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
+
     const rootRequired = new Set(op.requestBodyRequired);
     if (op.requestBodyIsArray) {
       args.push({
@@ -213,6 +269,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         // parents make this an approximation - documented in the README.
         const required = p.required && (p.apiFieldPath.length <= 1 ? rootRequired.has(p.apiFieldPath[0] ?? '') : rootRequired.has(p.apiFieldPath[0] ?? ''));
         args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema: argSchema(p) });
+      }
+    } else if (contentType === 'multipart/form-data' && op.multipart) {
+      for (const field of op.multipart.fields) {
+        args.push(multipartFieldArg(field));
       }
     } else if (op.hasRequestBody) {
       // Free-form or non-JSON body: one raw "body" argument.
@@ -249,7 +309,6 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       ),
       inputSchema: { type: 'object', properties, required: requiredArgs, additionalProperties: false },
     };
-    const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
 
@@ -268,6 +327,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       }
       // Over-budget schemas (huge generated component trees) stay text-only.
     }
+    const responseContentTypes = collectResponseContentTypes(op);
+    if (responseContentTypes.length > 0) tool.responseContentTypes = responseContentTypes;
     tools.push(tool);
   });
 
