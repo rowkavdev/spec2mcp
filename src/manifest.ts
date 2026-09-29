@@ -164,17 +164,29 @@ function argSchema(p: ParameterInfo): Record<string, unknown> {
  * branches (Forge flattens allOf when it derives body params, so the
  * nullability walk must see the same merged view - #87).
  */
+
+/** Assign spec-derived keys without triggering inherited setters: a field
+ * named "__proto__" hits the prototype setter on plain assignment and
+ * silently vanishes from the built object (#115). */
+function setOwn(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
 function mergedProperties(schema: Record<string, unknown> | undefined, seen = new Set<unknown>()): Record<string, unknown> {
   if (!schema || typeof schema !== 'object' || seen.has(schema)) return {};
   seen.add(schema);
   const out: Record<string, unknown> = {};
+  const mergeFrom = (source: Record<string, unknown>): void => {
+    // Object.assign would run the "__proto__" setter on spec keys (#115).
+    for (const [key, value] of Object.entries(source)) setOwn(out, key, value);
+  };
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
-      Object.assign(out, mergedProperties(resolveDocRef(branch) as Record<string, unknown> | undefined, seen));
+      mergeFrom(mergedProperties(resolveDocRef(branch) as Record<string, unknown> | undefined, seen));
     }
   }
   const own = schema.properties as Record<string, unknown> | undefined;
-  if (own && typeof own === 'object') Object.assign(out, own);
+  if (own && typeof own === 'object') mergeFrom(own);
   return out;
 }
 
@@ -307,7 +319,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     if (!Object.hasOwn(target, key) || key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') continue;
     charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
     first = false;
-    out[key] = dereferenceSchema(target[key], chain, budget, depth + 1, onUnresolved);
+    setOwn(out, key, dereferenceSchema(target[key], chain, budget, depth + 1, onUnresolved) as unknown);
   }
   if (target.nullable === true && typeof out.type === 'string') {
     // Replace the already-counted scalar type with its union representation.
@@ -579,7 +591,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const properties: Record<string, unknown> = {};
     const requiredArgs: string[] = [];
     for (const a of args) {
-      properties[a.name] = a.schema;
+      setOwn(properties, a.name, a.schema);
       if (a.required) requiredArgs.push(a.name);
     }
 

@@ -318,3 +318,56 @@ test('#112 an unresolvable $ref stays text-only and warns loudly', async () => {
     `expected a loud warning, got: ${(m.warnings ?? []).join(' | ')}`,
   );
 });
+
+test('#115 a __proto__ field name survives into input and output schemas', async () => {
+  // Parsed, not a literal: object literals treat __proto__ as the
+  // prototype, while JSON.parse (like the loader) creates an own key.
+  const doc = JSON.parse(`{
+    "openapi": "3.0.3",
+    "info": { "title": "Proto API", "version": "1.0.0" },
+    "servers": [{ "url": "https://proto.example.com" }],
+    "paths": {
+      "/things": {
+        "post": {
+          "operationId": "makeThing",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["__proto__"],
+                  "properties": { "__proto__": { "type": "string" }, "name": { "type": "string" } }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "ok",
+              "content": {
+                "application/json": {
+                  "schema": { "type": "object", "properties": { "__proto__": { "type": "string" }, "id": { "type": "string" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": { "schemas": {} }
+  }`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = buildManifest(doc as any);
+
+  const tool = m.tools.find((t) => t.name === 'make_thing');
+  assert.ok(tool);
+  assert.ok(Object.hasOwn(tool.inputSchema.properties as object, '__proto__'), 'input field must not vanish');
+  assert.deepEqual(tool.inputSchema.required, ['__proto__'], 'required preserved');
+  const outProps = tool.outputSchema?.properties as Record<string, unknown>;
+  assert.ok(Object.hasOwn(outProps, '__proto__'), 'output field must not vanish');
+  // Own enumerable: the field serializes into the generated manifest.
+  assert.ok(JSON.stringify(tool.inputSchema.properties).includes('__proto__'));
+});
