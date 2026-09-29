@@ -25,6 +25,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "demo": "node --import tsx examples/demo.mts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "prepublishOnly": "npm run build && npm test",
