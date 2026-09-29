@@ -460,7 +460,19 @@ function createMcpServer(manifest) {
   // Reusing compiled SDK/Ajv validators keeps call-time work payload-bound.
   const outputValidators = new Map();
   for (const tool of manifest.tools) {
-    if (tool.outputSchema) outputValidators.set(tool.name, compileOutputValidator(tool.outputSchema));
+    if (!tool.outputSchema) continue;
+    try {
+      outputValidators.set(tool.name, compileOutputValidator(tool.outputSchema));
+    } catch (err) {
+      // A schema with invalid keywords (bad regex pattern, non-array enum,
+      // string minimum, ...) survives generation but Ajv refuses to compile
+      // it. One bad tool must never take the server down: strip structured
+      // output for that tool and keep serving the rest.
+      console.error(
+        `${manifest.serverName}: ${tool.name}: outputSchema failed to compile (${err instanceof Error ? err.message : String(err)}); serving the tool without structured output`,
+      );
+      delete tool.outputSchema;
+    }
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -535,17 +547,19 @@ export async function runHttpServer(manifest, { port = 3000 } = {}) {
       return;
     }
     if (!entry) {
-      const server = createMcpServer(manifest);
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: randomUUID,
-        onsessioninitialized: (sessionId) => sessions.set(sessionId, { server, transport }),
-        onsessionclosed: (sessionId) => sessions.delete(sessionId),
-      });
-      transport.onclose = () => {
-        if (transport.sessionId) sessions.delete(transport.sessionId);
-      };
-      entry = { server, transport };
       try {
+        // createMcpServer compiles per-tool validators; a residual failure
+        // here must answer 500, not kill the process with an unhandled throw.
+        const server = createMcpServer(manifest);
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: randomUUID,
+          onsessioninitialized: (sessionId) => sessions.set(sessionId, { server, transport }),
+          onsessionclosed: (sessionId) => sessions.delete(sessionId),
+        });
+        transport.onclose = () => {
+          if (transport.sessionId) sessions.delete(transport.sessionId);
+        };
+        entry = { server, transport };
         await server.connect(transport);
       } catch (err) {
         console.error('MCP session setup failed:', err);
