@@ -384,13 +384,16 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
 
+    // Schema.required applies only when a body is present. The OpenAPI
+    // requestBody.required flag controls whether any body is needed at all.
+    const bodyRequired = (resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined)?.required === true;
     const rootRequired = new Set(op.requestBodyRequired);
     if (op.requestBodyIsArray) {
       args.push({
         name: 'body',
         location: 'body',
         apiFieldPath: [],
-        required: true,
+        required: bodyRequired,
         schema: { type: 'array', items: {}, description: op.requestBodyDescription ?? 'Request body (JSON array).' },
       });
     } else if (op.bodyParams.length > 0) {
@@ -399,12 +402,14 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         // A leaf is required at tool level when it is required within its
         // parent and its root field is required at body level. Nested optional
         // parents make this an approximation - documented in the README.
-        const required = p.required && (p.apiFieldPath.length <= 1 ? rootRequired.has(p.apiFieldPath[0] ?? '') : rootRequired.has(p.apiFieldPath[0] ?? ''));
+        const required = bodyRequired && p.required && rootRequired.has(p.apiFieldPath[0] ?? '');
         args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema: argSchema(p) });
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
       for (const field of op.multipart.fields) {
-        args.push(multipartFieldArg(field));
+        const arg = multipartFieldArg(field);
+        arg.required = bodyRequired && arg.required;
+        args.push(arg);
       }
     } else if (op.hasRequestBody) {
       // Free-form or non-JSON body: one raw "body" argument.
@@ -412,7 +417,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         name: 'body',
         location: 'body',
         apiFieldPath: [],
-        required: true,
+        required: bodyRequired,
         schema: { description: op.requestBodyDescription ?? 'Raw request body.' },
       });
     }
