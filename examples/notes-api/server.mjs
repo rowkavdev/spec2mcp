@@ -289,6 +289,10 @@ function baseContentType(headerValue) {
   return (headerValue ?? '').split(';', 1)[0].trim().toLowerCase();
 }
 
+// The exact JSON media predicate (#116): application/json or a +json
+// suffix. src/manifest.ts isJsonMediaType carries the same one rule - keep
+// them in sync. A looser match would advertise schemas for bodies that are
+// not single JSON documents (e.g. application/json-seq).
 function isJsonType(contentType) {
   return contentType === 'application/json' || contentType.endsWith('+json');
 }

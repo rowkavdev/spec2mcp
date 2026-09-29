@@ -374,7 +374,7 @@ function successJsonSchema(op: OperationInfo, onUnresolved?: (ref: string) => vo
     // stays text-only.
     const mediaTypes = Object.keys(content);
     if (mediaTypes.length === 0) return undefined;
-    const jsonMedia = mediaTypes.filter((m) => m.toLowerCase().includes('json'));
+    const jsonMedia = mediaTypes.filter(isJsonMediaType);
     if (jsonMedia.length === 0) return undefined;
     if (jsonMedia.length !== mediaTypes.length) return undefined;
     for (const mediaType of jsonMedia) {
@@ -444,6 +444,19 @@ function schemaAdmitsNonObjectRoot(schema: Record<string, unknown>, seen = new S
   // contracts for no real API; docs/guide.md records the caveat.
   if ('properties' in schema || 'required' in schema) return false;
   return true;
+}
+
+/**
+ * The exact JSON media predicate (#116): application/json or a +json
+ * suffix. runtime/server.mjs isJsonType carries the same one rule - keep
+ * them in sync. A substring match admitted types like application/json-seq
+ * or text/json, whose bodies are not single JSON documents: the compiler
+ * advertised an outputSchema the runtime could never produce structured
+ * content for, and every valid response came back isError.
+ */
+function isJsonMediaType(mediaType: string): boolean {
+  const normalized = mediaType.split(';', 1)[0]!.trim().toLowerCase();
+  return normalized === 'application/json' || normalized.endsWith('+json');
 }
 
 function schemaIsObject(schema: Record<string, unknown>): boolean {

@@ -246,3 +246,44 @@ test('#76 agreeing JSON media alternatives under one status are advertised', asy
   const m = buildManifest(d);
   assert.equal(m.tools[0]?.outputSchema?.type, 'object', 'equal shapes across JSON alternatives are honest');
 });
+
+test('#116 a json-seq success does not advertise an outputSchema', async () => {
+  // application/json-seq bodies are not single JSON documents: the runtime
+  // cannot produce structured content for them, so advertising would make
+  // every valid response isError (#116).
+  const d = doc({
+    '/events': {
+      get: {
+        operationId: 'streamEvents',
+        responses: {
+          '200': {
+            description: 'json-seq stream',
+            content: { 'application/json-seq': { schema: { type: 'object', properties: { id: { type: 'string' } } } } },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'only exact application/json or +json advertises');
+});
+
+test('#116 a +json suffix success still advertises', async () => {
+  const d = doc({
+    '/thing': {
+      get: {
+        operationId: 'getThing',
+        responses: {
+          '200': {
+            description: 'hal+json',
+            content: { 'application/hal+json': { schema: { type: 'object', properties: { id: { type: 'string' } } } } },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  assert.equal(m.tools[0]?.outputSchema?.type, 'object', 'the +json suffix is exact-JSON');
+});
