@@ -291,26 +291,29 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
     //   declares no commitment - #65) can validly answer non-JSON;
     // - a JSON media alternative without a schema admits any shape;
     // - a non-JSON media alternative alongside JSON can be the actual
-    //   response while the schema describes only the JSON one.
+    //   response while the schema describes only the JSON one;
+    // - JSON media alternatives under one status (application/json,
+    //   application/problem+json, vendor +json types) can each be the
+    //   actual response, so every one of them must agree (#76).
     // In each case advertising would reject a valid success, so the tool
     // stays text-only.
     const mediaTypes = Object.keys(content);
     if (mediaTypes.length === 0) return undefined;
-    const mediaType = mediaTypes.includes('application/json')
-      ? 'application/json'
-      : mediaTypes.find((m) => m.toLowerCase().includes('json'));
-    if (!mediaType) return undefined;
-    if (mediaTypes.some((m) => m !== mediaType && !m.toLowerCase().includes('json'))) return undefined;
-    const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
-    if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) return undefined;
-    let dereferenced: Record<string, unknown>;
-    try {
-      dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
-    } catch (error) {
-      if (error instanceof SchemaTooLarge) return undefined;
-      throw error;
+    const jsonMedia = mediaTypes.filter((m) => m.toLowerCase().includes('json'));
+    if (jsonMedia.length === 0) return undefined;
+    if (jsonMedia.length !== mediaTypes.length) return undefined;
+    for (const mediaType of jsonMedia) {
+      const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
+      if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) return undefined;
+      let dereferenced: Record<string, unknown>;
+      try {
+        dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof SchemaTooLarge) return undefined;
+        throw error;
+      }
+      shapes.push(dereferenced);
     }
-    shapes.push(dereferenced);
   }
   if (shapes.length === 0) return undefined;
   const first = JSON.stringify(shapes[0]);
