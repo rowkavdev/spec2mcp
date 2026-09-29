@@ -60,15 +60,56 @@ export type ToolDef = {
   authSchemeNames: string[];
 };
 
+export type WebhookInfo = {
+  /** Webhook name: the key in the spec's top-level webhooks object. */
+  name: string;
+  method: string;
+  operationId?: string;
+  description: string;
+};
+
 export type Manifest = {
   generator: string;
   apiTitle: string;
   apiVersion: string;
+  /** The spec's declared OpenAPI version, e.g. "3.0.3" or "3.1.0". */
+  specVersion: string;
   serverName: string;
   baseUrl: string;
   auth: AuthPlan;
+  /**
+   * Webhooks declared by an OpenAPI 3.1 spec. A webhook is an event the API
+   * sends to the consumer, so it can never be an MCP tool - it is recorded
+   * here for the generated README instead of being silently dropped.
+   */
+  webhooks: WebhookInfo[];
+  /** Custom JSON Schema dialect from the spec's jsonSchemaDialect field, if declared. */
+  jsonSchemaDialect?: string;
   tools: ToolDef[];
 };
+
+/** The dialect a 3.1 spec uses when it does not declare jsonSchemaDialect. */
+export const DEFAULT_31_DIALECT = 'https://spec.openapis.org/oas/3.1/dialect/base';
+
+const WEBHOOK_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
+
+function extractWebhooks(doc: OpenAPIV3.Document): WebhookInfo[] {
+  const out: WebhookInfo[] = [];
+  const webhooks = (doc as unknown as Record<string, unknown>).webhooks;
+  if (typeof webhooks !== 'object' || webhooks === null) return out;
+  for (const [name, pathItem] of Object.entries(webhooks as Record<string, unknown>)) {
+    if (!pathItem || typeof pathItem !== 'object') continue;
+    for (const method of WEBHOOK_METHODS) {
+      const op = (pathItem as Record<string, unknown>)[method] as OpenAPIV3.OperationObject | undefined;
+      if (!op || typeof op !== 'object') continue;
+      const description = op.summary?.trim() || op.description?.split('\n')[0]?.trim() || '';
+      const info: WebhookInfo = { name, method: method.toUpperCase(), description };
+      if (typeof op.operationId === 'string' && op.operationId.length > 0) info.operationId = op.operationId;
+      out.push(info);
+    }
+  }
+  return out;
+}
 
 export type ManifestOptions = OperationFilters & {
   serverName?: string;
@@ -387,13 +428,18 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     tools.push(tool);
   });
 
-  return {
+  const manifest: Manifest = {
     generator: `spec2mcp`,
     apiTitle,
     apiVersion: info.version ?? '0.0.0',
+    specVersion: doc.openapi ?? '',
     serverName: opts.serverName ?? envPrefix.toLowerCase().replace(/_/g, '-'),
     baseUrl,
     auth,
+    webhooks: extractWebhooks(doc),
     tools,
   };
+  const dialect = (doc as unknown as Record<string, unknown>).jsonSchemaDialect;
+  if (typeof dialect === 'string' && dialect.length > 0) manifest.jsonSchemaDialect = dialect;
+  return manifest;
 }
