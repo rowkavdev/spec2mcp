@@ -339,7 +339,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
       content: [
         {
           type: 'resource',
-          resource: { uri: url.toString(), mimeType: contentType || 'application/octet-stream', blob: bytes.toString('base64') },
+          resource: { uri: `urn:uuid:${randomUUID()}`, mimeType: contentType || 'application/octet-stream', blob: bytes.toString('base64') },
         },
       ],
     }, tool, 'non-JSON response has no structured content');
