@@ -195,6 +195,62 @@ function applyAuth(manifest, tool, url, headers) {
   return null;
 }
 
+/** Serialize OpenAPI path/query/header parameters before URL or header encoding. */
+function parameterStyle(arg) {
+  return arg.style ?? (arg.location === 'query' ? 'form' : 'simple');
+}
+function parameterParts(arg, value) {
+  const style = parameterStyle(arg);
+  const explode = arg.explode ?? (style === 'form');
+  const scalar = (item) => String(item);
+  if (Array.isArray(value)) {
+    const items = value.map(scalar);
+    if (style === 'spaceDelimited') return [items.join(' ')];
+    if (style === 'pipeDelimited') return [items.join('|')];
+    if (style === 'form' && explode) return items;
+    return [items.join(',')];
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (style === 'deepObject' && arg.location === 'query') return entries.map(([k, v]) => [k, scalar(v)]);
+    if (style === 'form' && explode) return entries.map(([k, v]) => [k, scalar(v)]);
+    if (style === 'simple' && explode) return [entries.map(([k, v]) => `${k}=${scalar(v)}`).join(',')];
+    return [entries.flatMap(([k, v]) => [k, scalar(v)]).join(',')];
+  }
+  return [scalar(value)];
+}
+function pathParameter(arg, value) {
+  const style = parameterStyle(arg);
+  const explode = arg.explode ?? false;
+  const encode = (item) => encodeURIComponent(String(item));
+  if (Array.isArray(value)) {
+    const items = value.map(encode);
+    if (style === 'label') return `.${items.join(explode ? '.' : ',')}`;
+    if (style === 'matrix') {
+      const name = encode(arg.apiName ?? arg.name);
+      return explode ? items.map((item) => `;${name}=${item}`).join('') : `;${name}=${items.join(',')}`;
+    }
+    return items.join(',');
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (style === 'matrix') {
+      const name = encode(arg.apiName ?? arg.name);
+      return explode
+        ? entries.map(([k, v]) => `;${encode(k)}=${encode(v)}`).join('')
+        : `;${name}=${entries.flatMap(([k, v]) => [encode(k), encode(v)]).join(',')}`;
+    }
+    const encoded = explode
+      ? entries.map(([k, v]) => `${encode(k)}=${encode(v)}`).join(style === 'label' ? '.' : ',')
+      : entries.flatMap(([k, v]) => [encode(k), encode(v)]).join(',');
+    return style === 'label' ? `.${encoded}` : encoded;
+  }
+  const encoded = encode(value);
+  if (style === 'label') return `.${encoded}`;
+  if (style === 'matrix') return `;${encode(arg.apiName ?? arg.name)}=${encoded}`;
+  return encoded;
+}
+
 /** The response content-type, lower-cased, without any charset parameter. */
 function baseContentType(headerValue) {
   return (headerValue ?? '').split(';', 1)[0].trim().toLowerCase();
@@ -274,7 +330,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
       if (segment === '.' || segment === '..') {
         return errorResult(`Invalid path argument "${arg.name}": dot segments are not allowed.`);
       }
-      path = path.replace(`{${arg.apiName ?? arg.name}}`, encodeURIComponent(segment));
+      path = path.replace(`{${arg.apiName ?? arg.name}}`, pathParameter(arg, value));
     }
   }
   let url;
@@ -287,12 +343,14 @@ async function executeTool(manifest, tool, args, validateOutput) {
       if (value === undefined) continue;
       if (arg.location === 'query') {
         const wireName = arg.apiName ?? arg.name;
-        if (Array.isArray(value)) {
-          for (const item of value) url.searchParams.append(wireName, String(item));
-        } else if (typeof value === 'object' && value !== null) {
-          url.searchParams.append(wireName, JSON.stringify(value));
-        } else {
-          url.searchParams.append(wireName, String(value));
+        const style = parameterStyle(arg);
+        const parts = parameterParts(arg, value);
+        for (const part of parts) {
+          if (Array.isArray(part)) {
+            url.searchParams.append(style === 'deepObject' ? `${wireName}[${part[0]}]` : part[0], part[1]);
+          } else {
+            url.searchParams.append(wireName, part);
+          }
         }
       }
     }
@@ -303,7 +361,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
     for (const arg of tool.args) {
       const value = args[arg.name];
       if (value === undefined || arg.location !== 'header') continue;
-      headers.set(arg.apiName ?? arg.name, String(value));
+      headers.set(arg.apiName ?? arg.name, parameterParts(arg, value).map((part) => Array.isArray(part) ? part.join('=') : part).join(','));
     }
 
     applyAuth(manifest, tool, url, headers);
