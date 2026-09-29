@@ -25,7 +25,8 @@ test('generated project serves Streamable HTTP with SSE, independent sessions an
   const manifest = JSON.parse(await readFile(join(dir, 'operations.json'), 'utf8'));
   const api = createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ path: req.url }));
+    // Pet-shaped: the SDK client validates structuredContent against the tool's outputSchema.
+    res.end(JSON.stringify({ id: 42, name: 'Rex', path: req.url }));
   });
   await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
   const apiAddress = api.address();
