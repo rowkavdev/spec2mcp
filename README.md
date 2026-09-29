@@ -72,6 +72,9 @@ The generated server's only dependency is `@modelcontextprotocol/sdk`.
 - One MCP tool per operation, named from the `operationId` in MCP-safe snake_case (`listPets` -> `list_pets`).
 - Path, query and header parameters become typed tool arguments with descriptions, enums and defaults from the spec.
 - JSON request bodies are flattened into arguments per field (`address.street`) and reconstructed into the nested body on the call. Array and free-form bodies become a single `body` argument.
+- `multipart/form-data` bodies become one argument per form field, sent as a real multipart request. File fields take `{ "contentBase64": "...", "filename": "...", "mimeType": "..." }` (only `contentBase64` is required); object and array fields are JSON-serialised into their form field.
+- Non-JSON responses map to MCP content types: images come back as image content, audio as audio content, and other binary types (PDF, zip, octet-stream) as embedded blob resources. Text and JSON responses come back as text.
+- Large responses are capped so one call cannot flood the conversation: text is truncated at 50,000 characters and binary payloads at 4 MiB, each with a notice saying so. Override with `SPEC2MCP_MAX_RESPONSE_CHARS` and `SPEC2MCP_MAX_BINARY_BYTES`.
 - Non-2xx responses come back as tool errors with the status and response body; missing required arguments fail before any request is made.
 
 ## Select tools and save project settings
@@ -126,7 +129,7 @@ Verified against two of the biggest public specs (run `node examples/live-github
 Honest list, all roadmap items:
 
 - Nested-body `required` flags are approximated when an intermediate object is optional
-- Non-JSON request bodies (multipart, octet-stream) pass through as a raw `body` string argument
+- Raw `application/octet-stream` request bodies pass through as a raw `body` string argument (multipart uploads are handled per field)
 - Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
 - `head`/`options`/`trace` operations are not exposed (Forge limitation)
 
