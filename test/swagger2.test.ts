@@ -58,6 +58,17 @@ test('Swagger 2.0 external relative $refs resolve against the spec, not cwd (#51
   assert.ok(tool.args.some((a) => a.name === 'name' || a.name === 'widget'), 'body schema from defs.yaml reached the manifest');
 });
 
+test('2.0 without produces keeps structured output for object responses (#57)', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/noproduces-2.0.json', import.meta.url)));
+  await init(doc);
+  const m = buildManifest(doc);
+  const thing = m.tools.find((t) => t.name === 'get_thing');
+  assert.ok(thing?.outputSchema, 'wildcard response with an object schema emits an outputSchema');
+  assert.equal(thing?.outputSchema?.type, 'object');
+  const version = m.tools.find((t) => t.name === 'get_version');
+  assert.ok(version && !version.outputSchema, 'scalar wildcard responses stay text-only');
+});
+
 test('a document with neither openapi nor swagger keys is rejected', async () => {
   await assert.rejects(loadSpec(fileURLToPath(new URL('./fixtures/compat/expectations.json', import.meta.url))), /OpenAPI 3.x or Swagger 2.0/);
 });
