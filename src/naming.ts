@@ -25,13 +25,17 @@ export function toToolName(operationId: string): string {
 
 /** Deduplicate tool names by appending _2, _3, ... */
 export function dedupeNames(names: string[]): string[] {
-  const seen = new Map<string, number>();
-  return names.map((n) => {
-    const count = seen.get(n) ?? 0;
-    seen.set(n, count + 1);
-    if (count === 0) return n;
-    let candidate = `${n}_${count + 1}`;
-    while (candidate.length > 64) candidate = `${n.slice(0, 60)}_${count + 1}`;
+  const emitted = new Set<string>();
+  return names.map((name) => {
+    // Reserve the actual emitted name, not merely its unsuffixed source:
+    // "foo_bar", "foo_bar", "foo_bar_2" must all stay distinct.
+    let candidate = name.slice(0, 64);
+    let suffix = 2;
+    while (emitted.has(candidate)) {
+      const ending = `_${suffix++}`;
+      candidate = `${name.slice(0, 64 - ending.length)}${ending}`;
+    }
+    emitted.add(candidate);
     return candidate;
   });
 }
