@@ -28,6 +28,16 @@ Or skip the project and serve a spec directly over stdio:
 npx spec2mcp serve openapi.json
 ```
 
+Streamable HTTP is available in both modes, with SSE support and separate MCP sessions per client:
+
+```bash
+npx spec2mcp serve openapi.json --transport http --port 3000
+# or, inside a generated project:
+PORT=3000 npm run start:http
+```
+
+Point an MCP Streamable HTTP client at `http://127.0.0.1:3000/mcp`. The server listens only on loopback, validates Host and Origin, and has **no client authentication**. Do not expose it on a public network; API credentials in the server environment are shared across clients. The default transport remains stdio.
+
 Two lines in your Claude Desktop config and every endpoint in the spec is a tool:
 
 ```json
@@ -94,7 +104,6 @@ Verified against two of the biggest public specs (run `node examples/live-github
 
 Honest list, all roadmap items:
 
-- stdio transport only (no streamable HTTP yet)
 - Nested-body `required` flags are approximated when an intermediate object is optional
 - Non-JSON request bodies (multipart, octet-stream) pass through as a raw `body` string argument
 - Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
@@ -102,7 +111,6 @@ Honest list, all roadmap items:
 
 ## Roadmap
 
-- Streamable HTTP transport for the generated server
 - Support configurable choices between multiple security OR alternatives
 - Overlay support (rename/curate tools via Forge's JSONPath overlays)
 - Upstream the transformer to [cloudflare/forge](https://github.com/cloudflare/forge) as their MCP target
@@ -114,7 +122,7 @@ Honest list, all roadmap items:
 npm install
 npm run typecheck   # strict tsc over src + vendored forge
 npm run build       # esbuild bundle -> dist/cli.mjs
-npm test            # node:test unit + e2e (drives a real MCP session over stdio)
+npm test            # node:test unit + e2e (drives MCP sessions over stdio and HTTP)
 ```
 
 Layout: `src/` (CLI, loader, manifest builder, transformer), `runtime/server.mjs` (the file copied into generated projects), `vendor/forge/` (pinned `@cloudflare/forge`, see its PINNED.md), `test/` (fixture specs + an e2e test that boots a generated server against a mock API).
