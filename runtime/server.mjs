@@ -197,7 +197,7 @@ async function executeTool(manifest, tool, args) {
     const value = args[arg.name];
     if (value === undefined) continue;
     if (arg.location === 'path') {
-      path = path.replace(`{${arg.name}}`, encodeURIComponent(String(value)));
+      path = path.replace(`{${arg.apiName ?? arg.name}}`, encodeURIComponent(String(value)));
     }
   }
   const url = new URL(baseUrl.replace(/\/+$/, '') + path);
@@ -205,12 +205,13 @@ async function executeTool(manifest, tool, args) {
     const value = args[arg.name];
     if (value === undefined) continue;
     if (arg.location === 'query') {
+      const wireName = arg.apiName ?? arg.name;
       if (Array.isArray(value)) {
-        for (const item of value) url.searchParams.append(arg.name, String(item));
+        for (const item of value) url.searchParams.append(wireName, String(item));
       } else if (typeof value === 'object' && value !== null) {
-        url.searchParams.append(arg.name, JSON.stringify(value));
+        url.searchParams.append(wireName, JSON.stringify(value));
       } else {
-        url.searchParams.append(arg.name, String(value));
+        url.searchParams.append(wireName, String(value));
       }
     }
   }
@@ -221,7 +222,7 @@ async function executeTool(manifest, tool, args) {
   for (const arg of tool.args) {
     const value = args[arg.name];
     if (value === undefined || arg.location !== 'header') continue;
-    headers.set(arg.name, String(value));
+    headers.set(arg.apiName ?? arg.name, String(value));
   }
 
   applyAuth(manifest, tool, url, headers);
