@@ -46,6 +46,17 @@ function errorResult(text) {
   return { content: [{ type: 'text', text }], isError: true };
 }
 
+/** SDK clients require structuredContent on successful calls with outputSchema.
+ * Keep the upstream content, but mark an unrepresentable response as a tool error. */
+function outputFallback(result, tool, note) {
+  if (!tool.outputSchema) return result;
+  return {
+    ...result,
+    isError: true,
+    content: [...result.content, { type: 'text', text: `[outputSchema fallback: ${note}]` }],
+  };
+}
+
 function setNested(target, fieldPath, value) {
   if (!fieldPath || fieldPath.length === 0) return value;
   let cursor = target;
@@ -582,22 +593,22 @@ async function executeTool(manifest, tool, args, validateOutput) {
   }
 
   if (bytes.length === 0) {
-    return textResult(`(empty response, HTTP ${res.status})`);
+    return outputFallback(textResult(`(empty response, HTTP ${res.status})`), tool, 'empty upstream response has no structured content');
   }
   if (isImageType(contentType) || isAudioType(contentType)) {
-    if (bytes.length > MAX_BINARY_BYTES) return oversizedBinaryResult(bytes.length, contentType);
-    return { content: [{ type: isImageType(contentType) ? 'image' : 'audio', data: bytes.toString('base64'), mimeType: contentType }] };
+    if (bytes.length > MAX_BINARY_BYTES) return outputFallback(oversizedBinaryResult(bytes.length, contentType), tool, 'oversized binary response omitted');
+    return outputFallback({ content: [{ type: isImageType(contentType) ? 'image' : 'audio', data: bytes.toString('base64'), mimeType: contentType }] }, tool, 'non-JSON response has no structured content');
   }
   if (!isTextLikeType(contentType)) {
-    if (bytes.length > MAX_BINARY_BYTES) return oversizedBinaryResult(bytes.length, contentType);
-    return {
+    if (bytes.length > MAX_BINARY_BYTES) return outputFallback(oversizedBinaryResult(bytes.length, contentType), tool, 'oversized binary response omitted');
+    return outputFallback({
       content: [
         {
           type: 'resource',
           resource: { uri: url.toString(), mimeType: contentType || 'application/octet-stream', blob: bytes.toString('base64') },
         },
       ],
-    };
+    }, tool, 'non-JSON response has no structured content');
   }
 
   if (isJsonType(contentType)) {
@@ -611,36 +622,29 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }
   }
   const result = textResult(truncateText(renderText(bytes, contentType)));
-  // Tools with a manifest outputSchema also return structuredContent (MCP
-  // spec). The text content stays for clients without structured support.
-  // Degrade silently to text-only when the body didn't parse as JSON or the
-  // API returned a shape the schema can't hold - MCP SDK clients hard-error
-  // a result whose structuredContent fails the advertised outputSchema, so
-  // a drifted response is validated away rather than attached.
-  if (tool.outputSchema && isJsonType(contentType)) {
-    let parsed;
-    try {
-      parsed = JSON.parse(bytes.toString('utf8'));
-    } catch {
-      parsed = undefined;
+  // Successful calls advertising outputSchema must have valid structuredContent.
+  // A drifted, truncated or non-JSON upstream response stays visible as a tool
+  // error, rather than violating the MCP client protocol with text-only success.
+  if (tool.outputSchema) {
+    if (!isJsonType(contentType)) {
+      return outputFallback(result, tool, 'non-JSON response has no structured content');
     }
-    let structured;
-    if (parsed !== undefined) {
-      if (tool.outputWrap) {
-        structured = { result: parsed ?? null };
-      } else if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        structured = parsed;
-      }
+    const parsed = JSON.parse(bytes.toString('utf8')); // checked above
+    const structured = tool.outputWrap
+      ? { result: parsed }
+      : (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : undefined);
+    if (!structured) {
+      return outputFallback(result, tool, 'JSON response is not an object required by outputSchema');
     }
-    if (structured && validateOutput && !validateOutput(structured)) {
-      console.error(`${manifest.serverName}: ${tool.name}: response does not match its outputSchema; returning text-only`);
-      structured = undefined;
+    if (validateOutput && !validateOutput(structured)) {
+      console.error(`${manifest.serverName}: ${tool.name}: response does not match its outputSchema; returning tool error`);
+      return outputFallback(result, tool, 'response does not match the advertised outputSchema');
     }
-    if (structured && JSON.stringify(structured).length > MAX_RESPONSE_CHARS) {
-      console.error(`${manifest.serverName}: ${tool.name}: structuredContent exceeds SPEC2MCP_MAX_RESPONSE_CHARS; returning truncated text only`);
-      structured = undefined;
+    if (JSON.stringify(structured).length > MAX_RESPONSE_CHARS) {
+      console.error(`${manifest.serverName}: ${tool.name}: structuredContent exceeds SPEC2MCP_MAX_RESPONSE_CHARS; returning tool error`);
+      return outputFallback(result, tool, 'structured response exceeds SPEC2MCP_MAX_RESPONSE_CHARS');
     }
-    if (structured) result.structuredContent = structured;
+    result.structuredContent = structured;
   }
   return result;
 }
