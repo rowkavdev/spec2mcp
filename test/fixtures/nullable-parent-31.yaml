@@ -18,6 +18,7 @@ paths:
               properties:
                 pet:
                   type: ["object", "null"]
+                  required: [id]
                   properties:
                     id:
                       type: string

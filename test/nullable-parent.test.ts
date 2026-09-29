@@ -16,6 +16,10 @@ import { init } from '../vendor/forge/index.js';
 import { loadSpec } from '../src/load.js';
 import { buildManifest } from '../src/manifest.js';
 
+const { compileOutputValidator } = (await import(
+  fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+)) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
+
 const FIXTURE = fileURLToPath(new URL('./fixtures/nullable-parent-31.yaml', import.meta.url));
 const RUNTIME = fileURLToPath(new URL('../runtime/server.mjs', import.meta.url));
 const OUT = fileURLToPath(new URL('../.tmp-e2e-nullable-parent/', import.meta.url));
@@ -69,8 +73,29 @@ before(async () => {
   const parent = tool.args.find((a) => a.name === 'pet');
   assert.ok(parent, 'parent arg retained');
   assert.equal(parent.required, true, 'required parent stays required');
-  assert.deepEqual(parent.schema.anyOf, [{ type: 'object' }, { type: 'null' }]);
-  assert.ok(tool.args.find((a) => a.name === 'pet.id'), 'leaf arg intact');
+  assert.deepEqual(parent.schema.anyOf, [
+    { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    { type: 'null' },
+  ]);
+  const leaf = tool.args.find((a) => a.name === 'pet.id');
+  assert.ok(leaf, 'leaf arg intact');
+  assert.equal(leaf.required, true, 'required leaf stays required at the arg level');
+
+  // #122: pet and pet.id cannot both sit in a flat `required` list - that
+  // would make the null branch inaccessible. The input schema uses
+  // conditional clauses instead: presence is pet OR pet.id, and pet.id is
+  // itself OR pet; pet.id-when-object is enforced inside the parent arg's
+  // object branch above.
+  const inputSchema = tool.inputSchema as { required?: string[]; allOf?: Record<string, unknown>[] };
+  assert.ok(!inputSchema.required?.includes('pet'), 'pet not flatly required');
+  assert.ok(!inputSchema.required?.includes('pet.id'), 'pet.id not flatly required');
+  assert.ok(Array.isArray(inputSchema.allOf), 'conditional clauses present');
+  const validate = compileOutputValidator(inputSchema);
+  assert.ok(validate({ pet: null }), '{pet:null} accepted');
+  assert.ok(validate({ 'pet.id': 'x' }), 'leaf-only accepted');
+  assert.ok(validate({ pet: { id: 'x' } }), 'parent object accepted');
+  assert.ok(!validate({ pet: {} }), 'pet.id required when pet is an object');
+  assert.ok(!validate({}), 'presence enforced');
 
   await writeFile(join(OUT, 'operations.json'), JSON.stringify(manifest, null, 2));
   await copyFile(RUNTIME, join(OUT, 'server.mjs'));
