@@ -46,5 +46,9 @@
     "esbuild": "^0.27.3",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rowkavdev/spec2mcp.git"
   }
 }
