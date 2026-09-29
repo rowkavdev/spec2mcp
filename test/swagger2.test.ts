@@ -58,13 +58,15 @@ test('Swagger 2.0 external relative $refs resolve against the spec, not cwd (#51
   assert.ok(tool.args.some((a) => a.name === 'name' || a.name === 'widget'), 'body schema from defs.yaml reached the manifest');
 });
 
-test('2.0 without produces keeps structured output for object responses (#57)', async () => {
+test('2.0 without produces advertises no outputSchema: wildcard media declares no JSON commitment (#65)', async () => {
+  // #57 briefly counted object-shaped wildcards as JSON candidates; #65
+  // superseded that - a wildcard entry means the API may validly answer
+  // non-JSON, so no outputSchema is advertised.
   const doc = await loadSpec(fileURLToPath(new URL('./fixtures/noproduces-2.0.json', import.meta.url)));
   await init(doc);
   const m = buildManifest(doc);
   const thing = m.tools.find((t) => t.name === 'get_thing');
-  assert.ok(thing?.outputSchema, 'wildcard response with an object schema emits an outputSchema');
-  assert.equal(thing?.outputSchema?.type, 'object');
+  assert.ok(thing && !thing.outputSchema, 'object-shaped wildcard response advertises no outputSchema');
   const version = m.tools.find((t) => t.name === 'get_version');
   assert.ok(version && !version.outputSchema, 'scalar wildcard responses stay text-only');
 });

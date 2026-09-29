@@ -284,14 +284,14 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   const shapes: Record<string, unknown>[] = [];
   for (const code of codes) {
     const content = op.responses[code]?.content ?? {};
-    // A `* /*` entry counts as JSON when it declares an object-shaped
-    // schema: swagger2openapi emits exactly that for 2.0 operations
-    // without `produces`, and those operations should keep structured
-    // output. Scalar/array wildcards stay text-only.
+    // Only explicit JSON media commits to a JSON response body (#65). A
+    // wildcard `* /*` entry (swagger2openapi's fill-in for 2.0 operations
+    // without produces) declares no such commitment: the API may validly
+    // answer text, and advertising a schema would reject that valid
+    // response. Wildcard statuses are skipped like schema-less ones.
     const mediaType = Object.keys(content).includes('application/json')
       ? 'application/json'
-      : (Object.keys(content).find((m) => m.toLowerCase().includes('json')) ??
-        (isObjectSchemaEntry(content['*/*']) ? '*/*' : undefined));
+      : Object.keys(content).find((m) => m.toLowerCase().includes('json'));
     if (!mediaType) continue;
     const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
     if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) continue;
@@ -310,16 +310,6 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
     if (JSON.stringify(shape) !== first) return undefined;
   }
   return shapes[0];
-}
-
-function isObjectSchemaEntry(entry: unknown): boolean {
-  const schema = (entry as { schema?: unknown } | undefined)?.schema;
-  return (
-    schema !== null &&
-    typeof schema === 'object' &&
-    Object.keys(schema as Record<string, unknown>).length > 0 &&
-    schemaIsObject(schema as Record<string, unknown>)
-  );
 }
 
 function schemaIsObject(schema: Record<string, unknown>): boolean {

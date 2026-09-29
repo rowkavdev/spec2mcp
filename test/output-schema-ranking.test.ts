@@ -86,3 +86,25 @@ test('#61 differing success shapes advertise no outputSchema', async () => {
   const m = buildManifest(d);
   assert.equal(m.tools[0]?.outputSchema, undefined, 'a valid 201 must never be validated against the 200 shape');
 });
+
+test('#65 wildcard response media does not advertise an outputSchema', async () => {
+  // Converted Swagger 2.0 without produces arrives as `*/*` content: the
+  // API committed to no media type, so a valid plain-text answer must not
+  // be rejected against an advertised JSON schema.
+  const d = doc({
+    '/thing': {
+      get: {
+        operationId: 'getThing',
+        responses: {
+          '200': {
+            description: 'maybe json, maybe not',
+            content: { '*/*': { schema: { type: 'object', properties: { id: { type: 'string' } } } } },
+          },
+        },
+      },
+    },
+  });
+  await init(d);
+  const m = buildManifest(d);
+  assert.equal(m.tools[0]?.outputSchema, undefined, 'wildcard media declares no JSON commitment');
+});
