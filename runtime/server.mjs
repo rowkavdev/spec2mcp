@@ -145,20 +145,41 @@ function buildFormBody(tool, args) {
   return parts > 0 ? form : undefined;
 }
 
-/** Encode flat OpenAPI form objects. Arrays repeat the field name. */
-function formBody(value) {
+/** Encode flat OpenAPI form objects using per-property encoding rules. */
+function formBody(value, encodings = {}) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ToolArgumentError('Argument "body" must be an object for application/x-www-form-urlencoded.');
   }
   const params = new URLSearchParams();
+  for (const [key, encoding] of Object.entries(encodings)) {
+    if (encoding?.unsupported || !['form', 'spaceDelimited', 'pipeDelimited'].includes(encoding?.style ?? 'form')) {
+      throw new ToolArgumentError(`Unsupported form encoding for field "${key}".`);
+    }
+  }
   for (const [key, field] of Object.entries(value)) {
     if (field === undefined) continue;
+    const encoding = encodings[key] ?? {};
+    if (encoding.unsupported) {
+      throw new ToolArgumentError(`Unsupported form encoding for field "${key}": ${encoding.unsupported}.`);
+    }
+    const style = encoding.style ?? 'form';
+    const explode = encoding.explode ?? (style === 'form');
+    if (!['form', 'spaceDelimited', 'pipeDelimited'].includes(style)) {
+      throw new ToolArgumentError(`Unsupported form encoding style "${style}" for field "${key}".`);
+    }
     const values = Array.isArray(field) ? field : [field];
     for (const item of values) {
       if (item === null || typeof item === 'object') {
         throw new ToolArgumentError(`Form field "${key}" must be a scalar or array of scalars.`);
       }
-      params.append(key, String(item));
+    }
+    if (!Array.isArray(field)) {
+      params.append(key, String(field));
+    } else if (style === 'form' && explode) {
+      for (const item of values) params.append(key, String(item));
+    } else {
+      const separator = style === 'spaceDelimited' ? ' ' : style === 'pipeDelimited' ? '|' : ',';
+      params.append(key, values.map(String).join(separator));
     }
   }
   return params.toString();
@@ -399,7 +420,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
           }
         } else if (baseContentType(tool.contentType) === 'application/x-www-form-urlencoded') {
           try {
-            body = formBody(raw);
+            body = formBody(raw, tool.formEncoding);
           } catch (err) {
             if (err instanceof ToolArgumentError) return errorResult(err.message);
             throw err;

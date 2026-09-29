@@ -61,6 +61,8 @@ before(async () => {
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
       tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
+      { ...tool('formCsv', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'form', explode: false } } },
+      { ...tool('formUnsupported', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'deepObject' } } },
       tool('queryArray', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
       tool('queryExplode', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: true, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
       tool('queryDeep', 'GET', [{ name: 'filter', location: 'query', style: 'deepObject', explode: true, required: false, schema: { type: 'object' } }]),
@@ -241,4 +243,17 @@ test('#83 query, path and header arrays honor style/explode', async () => {
   const pipe = await call('queryPipe', { tags: ['cat', 'dog'] });
   assert.equal(pipe.isError, undefined);
   assert.equal(new URL(seen.at(-1)!.url, 'http://localhost').searchParams.get('tags'), 'cat|dog');
+});
+
+test('#86 form property explode:false sends one CSV field, not repeated keys', async () => {
+  const response = await call('formCsv', { body: { tags: ['cat', 'dog'], name: 'Alice' } });
+  assert.equal(response.isError, undefined);
+  const request = seen.at(-1)!;
+  assert.equal(request.body.toString('utf8'), 'tags=cat%2Cdog&name=Alice');
+  assert.deepEqual(new URLSearchParams(request.body.toString('utf8')).getAll('tags'), ['cat,dog']);
+  const count = seen.length;
+  const unsupported = await call('formUnsupported', { body: { tags: ['cat', 'dog'] } });
+  assert.equal(unsupported.isError, true);
+  assert.match(unsupported.content[0].text, /Unsupported form encoding/);
+  assert.equal(seen.length, count);
 });
