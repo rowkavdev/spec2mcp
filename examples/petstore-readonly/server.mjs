@@ -309,7 +309,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
             throw err;
           }
         } else {
-          body = typeof raw === 'string' ? raw : JSON.stringify(raw);
+          body = isJsonType(baseContentType(tool.contentType)) ? JSON.stringify(raw) : (typeof raw === 'string' ? raw : JSON.stringify(raw));
         }
       } else {
         const obj = {};
