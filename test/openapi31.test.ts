@@ -208,3 +208,29 @@ test('#92 a root-nullable response schema wraps under result', async () => {
   assert.equal(validate({ result: null }), true, 'valid JSON null response');
   assert.equal(validate({ result: { id: 'a' } }), true, 'valid object response');
 });
+
+test('#95 oneOf and const root-null response schemas wrap under result', async () => {
+  const doc = await loadSpec(NULLABLE31);
+  await init(doc);
+  const m = buildManifest(doc);
+
+  const { compileOutputValidator } = (await import(
+    fileURLToPath(new URL('../runtime/server.mjs', import.meta.url))
+  )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
+
+  const showCat = m.tools.find((t) => t.name === 'show_cat');
+  assert.ok(showCat);
+  assert.equal(showCat.outputWrap, true, 'oneOf null branch wraps');
+  const catResult = (showCat.outputSchema?.properties as Record<string, unknown>).result;
+  assert.ok(catResult && typeof catResult === 'object' && 'oneOf' in (catResult as Record<string, unknown>), 'oneOf shape preserved under result');
+  const validateCat = compileOutputValidator(showCat.outputSchema);
+  assert.equal(validateCat({ result: null }), true, 'valid oneOf null response');
+  assert.equal(validateCat({ result: { id: 'c' } }), true, 'valid oneOf object response');
+
+  const showGhost = m.tools.find((t) => t.name === 'show_ghost');
+  assert.ok(showGhost);
+  assert.equal(showGhost.outputWrap, true, 'const null wraps');
+  const validateGhost = compileOutputValidator(showGhost.outputSchema);
+  assert.equal(validateGhost({ result: null }), true, 'valid const null response');
+  assert.equal(validateGhost({ result: { id: 'g' } }), false, 'non-null still rejected');
+});

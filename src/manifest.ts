@@ -5,6 +5,7 @@
  * interprets it is identical for every spec.
  */
 import type { OpenAPIV3 } from 'openapi-types';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import {
   getAllOperationIds,
   resolveOperation,
@@ -373,16 +374,23 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
   return shapes[0];
 }
 
+const nullProbe = new AjvJsonSchemaValidator();
+
 /**
- * Root-level nullability (#92): a type union including null, or an anyOf
- * with a null branch. A null root is a real response, and MCP structured
- * content cannot express it unwrapped - such schemas take the result wrap.
+ * Root-level nullability (#92, #95): a null root is a real response, and
+ * MCP structured content cannot express it unwrapped - such schemas take
+ * the result wrap. Nullability hides in many shapes (type unions, anyOf,
+ * oneOf, enum, const, not), so probe the dereferenced schema with the
+ * validator instead of enumerating them: if JSON null validates, wrap.
+ * An uncompilable schema cannot prove null is valid; do not wrap on a
+ * guess, matching the compile-time fallback.
  */
-function schemaIsNullableRoot(schema: Record<string, unknown>): boolean {
-  const t = schema.type;
-  if (Array.isArray(t) && t.includes('null')) return true;
-  const anyOf = schema.anyOf;
-  return Array.isArray(anyOf) && anyOf.some((b) => (b as Record<string, unknown>)?.type === 'null');
+function schemaValidatesNull(schema: Record<string, unknown>): boolean {
+  try {
+    return nullProbe.getValidator(schema)(null).valid === true;
+  } catch {
+    return false;
+  }
 }
 
 function schemaIsObject(schema: Record<string, unknown>): boolean {
@@ -573,7 +581,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       // content, so arrays, primitives and root-nullable schemas (#92: a
       // valid JSON null cannot be emitted unwrapped) go under a single
       // "result" property; plain object schemas advertise as-is.
-      const wrap = !schemaIsObject(responseSchema) || schemaIsNullableRoot(responseSchema);
+      const wrap = !schemaIsObject(responseSchema) || schemaValidatesNull(responseSchema);
       const candidate = wrap
         ? { type: 'object', properties: { result: responseSchema }, required: ['result'] }
         : { ...responseSchema, type: 'object' };

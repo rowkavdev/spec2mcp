@@ -80,3 +80,35 @@ paths:
                 properties:
                   id:
                     type: string
+  /cats/{catId}:
+    get:
+      operationId: showCat
+      parameters:
+        - name: catId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK, or JSON null via oneOf
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - type: "null"
+  /ghost:
+    get:
+      operationId: showGhost
+      responses:
+        '200':
+          description: Always JSON null via const
+          content:
+            application/json:
+              schema:
+                const: null
