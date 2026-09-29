@@ -357,13 +357,13 @@ async function executeTool(manifest, tool, args, validateOutput) {
     const value = args[arg.name];
     if (value === undefined) continue;
     if (arg.location === 'path') {
-      const segment = String(value);
-      // WHATWG URL normalizes . and .. even when percent-encoded, which
-      // would route a request to a different endpoint than the declared tool.
+      // Check the encoded wire segment, not String(value): label-style empty
+      // arrays/objects serialize as '.', which WHATWG URL then normalizes.
+      const segment = pathParameter(arg, value);
       if (segment === '.' || segment === '..') {
         return errorResult(`Invalid path argument "${arg.name}": dot segments are not allowed.`);
       }
-      path = path.replace(`{${arg.apiName ?? arg.name}}`, pathParameter(arg, value));
+      path = path.replace(`{${arg.apiName ?? arg.name}}`, segment);
     }
   }
   let url;
