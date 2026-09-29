@@ -124,10 +124,18 @@ Verified against two of the biggest public specs (run `node examples/live-github
 - **GitHub's official REST API spec** - 1,231 tools generated; the example then npm-installs the project, connects the official MCP client over stdio, and calls `repos_get` against live api.github.com.
 - **Cloudflare's own public API spec** (2,185 paths, ~26 MB) - 3,469 tools generated in about 9 seconds, with the `api_token` bearer scheme mapped to an env var.
 
+## OpenAPI 3.1
+
+3.1 specs work: JSON Schema 2020-12 type unions (`type: ["string", "null"]`) are collapsed to a single type at load, a multi-type union becomes an `anyOf` the resolver understands, and a webhook-only document (no `paths`) is valid input. Two 3.1-specific fields are handled explicitly:
+
+- **`webhooks`** - a webhook is an event the API sends to *your* server, so webhooks are never tools. They are recorded in `operations.json` and listed in the generated README instead of being silently dropped.
+- **`jsonSchemaDialect`** - recorded in `operations.json`; a non-default dialect is flagged in the generated README and CLI output, since tool argument schemas are approximated as standard JSON Schema.
+
 ## Current limitations
 
 Honest list, all roadmap items:
 
+- Multi-type unions (`type: [string, integer]`) degrade to a string argument; single-type-plus-null collapses cleanly
 - Nested-body `required` flags are approximated when an intermediate object is optional
 - Raw `application/octet-stream` request bodies pass through as a raw `body` string argument (multipart uploads are handled per field)
 - Forge currently indexes GET/POST/PUT/PATCH/DELETE operations
