@@ -276,9 +276,14 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
     });
   for (const code of codes) {
     const content = op.responses[code]?.content ?? {};
+    // A `* /*` entry counts as JSON when it declares an object-shaped
+    // schema: swagger2openapi emits exactly that for 2.0 operations
+    // without `produces`, and those operations should keep structured
+    // output. Scalar/array wildcards stay text-only.
     const mediaType = Object.keys(content).includes('application/json')
       ? 'application/json'
-      : Object.keys(content).find((m) => m.toLowerCase().includes('json'));
+      : (Object.keys(content).find((m) => m.toLowerCase().includes('json')) ??
+        (isObjectSchemaEntry(content['*/*']) ? '*/*' : undefined));
     if (!mediaType) continue;
     const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
     if (schema && typeof schema === 'object' && Object.keys(schema).length > 0) {
@@ -291,6 +296,16 @@ function successJsonSchema(op: OperationInfo): Record<string, unknown> | undefin
     }
   }
   return undefined;
+}
+
+function isObjectSchemaEntry(entry: unknown): boolean {
+  const schema = (entry as { schema?: unknown } | undefined)?.schema;
+  return (
+    schema !== null &&
+    typeof schema === 'object' &&
+    Object.keys(schema as Record<string, unknown>).length > 0 &&
+    schemaIsObject(schema as Record<string, unknown>)
+  );
 }
 
 function schemaIsObject(schema: Record<string, unknown>): boolean {
