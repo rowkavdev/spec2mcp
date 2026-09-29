@@ -14,5 +14,5 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "test", "scripts", "vendor/forge"]
+  "include": ["src", "test", "scripts", "vendor/forge", "examples"]
 }
