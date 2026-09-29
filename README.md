@@ -118,12 +118,21 @@ Env var names are derived from the API title and scheme name, e.g. `PET_STORE_BE
 
 Cloudflare's own [Code Mode](https://developers.cloudflare.com/agents/model-context-protocol/guides/build-codemode-openapi-mcp-server/) (`openApiMcpServer()`) exposes an API through a hosted search/execute proxy running on Cloudflare. spec2mcp is the other shape: it generates a standalone server project from the spec - a file tree you own, run where you want, and check into git. No hosted dependency. The two complement each other, which is also why this transformer fits Forge's plugin model.
 
-## Scale
+## Scale and verified APIs
 
 Verified against two of the biggest public specs (run `node examples/live-github.mjs` to reproduce the second):
 
 - **GitHub's official REST API spec** - 1,231 tools generated; the example then npm-installs the project, connects the official MCP client over stdio, and calls `repos_get` against live api.github.com.
 - **Cloudflare's own public API spec** (2,185 paths, ~26 MB) - 3,469 tools generated in about 9 seconds, with the `api_token` bearer scheme mapped to an env var.
+
+CI also runs a compat matrix over pinned snapshots of four large public APIs, verifying generation, exact tool counts and tool shape (`test/compat.test.ts`). Snapshots live in `test/fixtures/compat/` and are refreshed from the live sources with `npm run compat:refresh`.
+
+| API | OpenAPI | Tools | Notes |
+| --- | --- | --- | --- |
+| [Stripe](https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json) | 3.0.0 | 612 | Basic-auth scheme maps to `STRIPE_API_BASIC_AUTH` |
+| [Kubernetes (core/v1)](https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/v3/api__v1_openapi.json) | 3.0.0 | 236 | No server URL in the spec - set `KUBERNETES_BASE_URL` |
+| [Spotify Web API](https://developer.spotify.com/reference/web-api/open-api-schema.yaml) | 3.0.3 | 96 | References an external file (`../policies.yaml`), bundled at load |
+| [Vercel](https://openapi.vercel.sh/) | 3.0.3 | 431 | Auth is declared per-operation; only root-level security maps today (roadmap) |
 
 ## OpenAPI 3.1
 
