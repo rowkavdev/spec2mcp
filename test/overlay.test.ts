@@ -76,3 +76,47 @@ test('#50 removal deletes every matched sibling in multiple arrays', () => {
   assert.deepEqual(doc.paths['/b']?.get?.security, []);
   assert.deepEqual(doc.servers, []);
 });
+
+test('#53 overlay updates reject prototype pollution at any depth without mutating the spec', () => {
+  for (const key of ['__proto__', 'prototype', 'constructor']) {
+    for (const update of [
+      JSON.parse(`{"${key}":{"polluted":true}}`),
+      JSON.parse(`{"description":"should not land","nested":{"${key}":{"polluted":true}}}`),
+      JSON.parse(`{"items":[{"${key}":{"polluted":true}}]}`),
+    ]) {
+      const doc = {
+        openapi: '3.0.0', info: { title: 'Safe', version: '1' },
+        paths: { '/safe': { get: { operationId: 'safe' } } },
+      } as unknown as Parameters<typeof applyOverlays>[0];
+      const before = structuredClone(doc);
+      const overlay = {
+        name: 'hostile', overlay: {
+          overlay: '1.0.0', info: { title: 'Hostile', version: '1' },
+          actions: [{ target: '$.paths.*.get', update }],
+        },
+      } as unknown as Parameters<typeof applyOverlays>[1][number];
+      assert.throws(() => applyOverlays(doc, [overlay]), /forbidden key/);
+      assert.deepEqual(doc, before);
+      assert.equal(({} as Record<string, unknown>).polluted, undefined);
+    }
+  }
+});
+
+test('#53 overlay update never merges into an inherited property', () => {
+  const inherited = { description: { original: true } };
+  const operation = Object.create(inherited) as Record<string, unknown>;
+  operation.operationId = 'safe';
+  const doc = {
+    openapi: '3.0.0', info: { title: 'Safe', version: '1' },
+    paths: { '/safe': { get: operation } },
+  } as unknown as Parameters<typeof applyOverlays>[0];
+  const overlay = {
+    name: 'safe', overlay: {
+      overlay: '1.0.0', info: { title: 'Safe', version: '1' },
+      actions: [{ target: '$.paths.*.get', update: { description: { updated: true } } }],
+    },
+  } as unknown as Parameters<typeof applyOverlays>[1][number];
+  applyOverlays(doc, [overlay]);
+  assert.deepEqual(operation.description, { updated: true });
+  assert.deepEqual(inherited.description, { original: true });
+});
