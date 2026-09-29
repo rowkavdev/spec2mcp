@@ -461,7 +461,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    return errorResult(`Request failed: ${err instanceof Error ? err.message : String(err)}`);
+    return errorResult('Request failed while connecting to the API. Check the base URL and network settings.');
   }
 
   if (res.status >= 300 && res.status < 400) {

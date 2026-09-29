@@ -69,3 +69,54 @@ test('#98 cross-origin 307 never forwards API key or body', async () => {
   assert.equal(sourceHits, 1);
   assert.equal(targetHits, 0);
 });
+
+test('#97 credentialed base URL fetch error does not echo username, password or URL', async () => {
+  const dir = `${OUT}-credentials`;
+  await mkdir(dir, { recursive: true });
+  const port = (source.address() as AddressInfo).port;
+  const username = 'private-user';
+  const password = 'private-pass';
+  const manifest = {
+    serverName: 'credential-test', apiVersion: '1',
+    baseUrl: `http://${username}:${password}@127.0.0.1:${port}/`,
+    auth: { schemes: [] },
+    tools: [{ name: 'check', operationId: 'check', method: 'GET', path: '/check', args: [],
+      inputSchema: { type: 'object', properties: {}, required: [] } }],
+  };
+  await writeFile(`${dir}/operations.json`, JSON.stringify(manifest));
+  await copyFile(RUNTIME, `${dir}/server.mjs`);
+  const second = spawn(process.execPath, [`${dir}/server.mjs`], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let secondBuffer = '';
+  const reply = new Map<number, (message: any) => void>();
+  second.stdout!.on('data', (chunk) => {
+    secondBuffer += chunk.toString(); let i: number;
+    while ((i = secondBuffer.indexOf('\n')) >= 0) {
+      const line = secondBuffer.slice(0, i); secondBuffer = secondBuffer.slice(i + 1);
+      if (!line) continue;
+      const message = JSON.parse(line);
+      if (reply.has(message.id)) { reply.get(message.id)!(message); reply.delete(message.id); }
+    }
+  });
+  second.stderr!.on('data', () => {});
+  let id = 1;
+  const secondRpc = (method: string, params?: Record<string, unknown>): Promise<any> => new Promise((resolve, reject) => {
+    const currentId = id++;
+    const timer = setTimeout(() => reject(new Error('credential test RPC timeout')), 10_000);
+    reply.set(currentId, (message) => { clearTimeout(timer); resolve(message); });
+    second.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: currentId, method, params }) + '\n');
+  });
+  try {
+    await secondRpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'credential-test', version: '1' } });
+    second.stdin!.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    const result = await secondRpc('tools/call', { name: 'check', arguments: {} });
+    assert.equal(result.error, undefined);
+    assert.equal(result.result.isError, true);
+    assert.match(result.result.content[0].text, /Request failed/);
+    assert.ok(!JSON.stringify(result).includes(username));
+    assert.ok(!JSON.stringify(result).includes(password));
+    assert.ok(!JSON.stringify(result).includes(`127.0.0.1:${port}`));
+  } finally {
+    second.kill('SIGKILL');
+    await rm(dir, { recursive: true, force: true });
+  }
+});
