@@ -1,0 +1,53 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Pet Store", "version": "1.0.0" },
+  "host": "api.petstore.test",
+  "basePath": "/v1",
+  "schemes": ["https"],
+  "securityDefinitions": {
+    "basicAuth": { "type": "basic" },
+    "api_key": { "type": "apiKey", "name": "X-API-Key", "in": "header" }
+  },
+  "security": [{ "api_key": [] }],
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "type": "integer" }
+        ],
+        "responses": { "200": { "description": "A list of pets." } }
+      },
+      "post": {
+        "summary": "Create a pet (no operationId on purpose)",
+        "parameters": [
+          {
+            "name": "pet", "in": "body", "required": true,
+            "schema": { "$ref": "#/definitions/Pet" }
+          }
+        ],
+        "responses": { "201": { "description": "Created." } }
+      }
+    },
+    "/pets/{id}": {
+      "get": {
+        "operationId": "getPet",
+        "security": [{ "basicAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "type": "string" }
+        ],
+        "responses": { "200": { "description": "One pet." } }
+      }
+    }
+  },
+  "definitions": {
+    "Pet": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "tag": { "type": "string" }
+      }
+    }
+  }
+}
