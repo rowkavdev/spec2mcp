@@ -224,7 +224,7 @@ test('other binary responses map to MCP blob resources', async () => {
   const resource = content[0]!.resource!;
   assert.equal(resource.mimeType, 'application/pdf');
   assert.equal(resource.blob, PDF_BYTES.toString('base64'));
-  assert.match(resource.uri, /\/media\/pets\/7\/records$/);
+  assert.match(resource.uri, /^urn:uuid:[0-9a-f-]+$/);
 });
 
 test('binary responses over the byte cap are summarised, not shipped', async () => {
