@@ -16,6 +16,15 @@ vendored diff before committing; keep attribution and the license.
 
 ## Deviations from verbatim
 
+- forge.ts: finalize writes through a temp file renamed over the destination
+  and unlinks symlinked ancestors inside the output directory, so a symlink
+  planted at an owned output path cannot redirect a write outside it (#213).
+  Applied 2026-09-30; drop if upstream adopts the same hardening.
+- forge.ts: finalize's temp writes moved into a private mkdtemp directory
+  inside the output - a predictable temp filename could itself be
+  pre-planted as a symlink to redirect the write before the rename (#214).
+  Applied 2026-09-30; drop if upstream adopts the same hardening.
+
 - openapi-resolver.ts: additively carries the OpenAPI `allowReserved`
   parameter flag through Parameter -> ParameterInfo (3 interface fields +
   1 extraction line, no behavior change to existing paths), for #108.

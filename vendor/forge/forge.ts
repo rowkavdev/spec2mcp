@@ -1,5 +1,5 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, normalize, resolve } from 'node:path';
+import { lstat, mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { OpenAPIV3 } from 'openapi-types';
 import { matchResponseStatusKey, type ResponseInfo, resolveOperation } from './openapi-resolver.js';
 import type { Schema } from './schema/schema.js';
@@ -22,6 +22,18 @@ export type MethodMapEntry = string | Record<string, MethodMapEntry[]>;
  * Returned by `forge.transform()` so callers can inspect every file that was
  * produced, and accepted by `forge.finalize()` to write them to disk.
  */
+/** Unlink symlinked segments between root and dir (dir inclusive, root
+ * exclusive) so writes cannot escape the output directory (#213). */
+async function unlinkSymlinkedAncestors(root: string, dir: string): Promise<void> {
+  const segments = dir.slice(root.length).split(sep).filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    const stats = await lstat(current).catch(() => undefined);
+    if (stats?.isSymbolicLink()) await unlink(current);
+  }
+}
+
 export class SourceFile {
   constructor(
     /** Relative file path (e.g. "resources/d1.ts") */
@@ -224,11 +236,34 @@ export class Forge {
       resolvedFiles.set(fullPath, file.content);
     }
 
+    // A symlinked path segment inside the output directory would redirect
+    // writes outside it; unlink symlinked ancestors before creating
+    // directories (#213).
+    for (const dir of dirs) {
+      await unlinkSymlinkedAncestors(resolvedOutputDir, dir);
+    }
+
     // Create all directories in parallel
     await Promise.all(Array.from(dirs).map((dir) => mkdir(dir, { recursive: true })));
 
-    // Write all files in parallel
-    await Promise.all(Array.from(resolvedFiles.entries()).map(([fullPath, content]) => writeFile(fullPath, content)));
+    // Write through a private temp directory inside the output, renamed
+    // over each destination. The directory is unpredictable and owner-only,
+    // so a pre-planted symlink cannot redirect the write the way a
+    // predictable temp name could (#214); rename then swaps the directory
+    // entry itself, replacing a planted symlink or hard link atomically
+    // (#213).
+    if (resolvedFiles.size > 0) {
+      const tempDir = await mkdtemp(join(resolvedOutputDir, '.spec2mcp-tmp-'));
+      try {
+        await Promise.all(Array.from(resolvedFiles.entries()).map(async ([fullPath, content], index) => {
+          const tempPath = join(tempDir, String(index));
+          await writeFile(tempPath, content);
+          await rename(tempPath, fullPath);
+        }));
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    }
 
     return files;
   }
