@@ -237,7 +237,8 @@ function bodySchemaAtPath(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath:
   const requestBody = resolveDocRef(
     doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody,
   ) as OpenAPIV3.RequestBodyObject | undefined;
-  let schema = resolveDocRef(requestBody?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
+  const mediaType = pickContentType(Object.keys(requestBody?.content ?? {}));
+  let schema = resolveDocRef(mediaType && isJsonMediaType(mediaType) ? requestBody?.content?.[mediaType]?.schema : undefined) as Record<string, unknown> | undefined;
   for (const segment of fieldPath) {
     if (!schema || typeof schema !== 'object') return undefined;
     schema = resolveDocRef(mergedProperties(schema)[segment]) as Record<string, unknown> | undefined;
@@ -656,6 +657,16 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         warnings.push(`${toolName}: required body properties cannot be flattened and the whole-body schema exceeds the input budget; using an unconstrained body argument`);
         wholeBodySchema = {};
       }
+    }
+    if (contentType && isJsonMediaType(contentType) && contentType !== 'application/json') {
+      const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const schema = resolveDocRef(body?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
+      const collect = (node: Record<string, unknown> | undefined): void => {
+        if (!node) return;
+        if (Array.isArray(node.required)) for (const name of node.required) if (typeof name === 'string') rootRequired.add(name);
+        if (Array.isArray(node.allOf)) for (const branch of node.allOf) collect(resolveDocRef(branch) as Record<string, unknown>);
+      };
+      collect(schema);
     }
     if (wholeBodyRequired) {
       args.push({ name: 'body', location: 'body', apiFieldPath: [], required: bodyRequired, schema: wholeBodySchema! });
