@@ -43,6 +43,8 @@ export type ToolArg = {
   style?: string;
   explode?: boolean;
   allowReserved?: boolean;
+  /** Query content media serialization instead of style/explode. */
+  parameterContentType?: string;
   required: boolean;
   schema: Record<string, unknown>;
 };
@@ -200,11 +202,19 @@ function applySourceConstraints(schema: Record<string, unknown>, source: Record<
   return schema;
 }
 
-function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
+function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: string, location: string): OpenAPIV3.ParameterObject | undefined {
   const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
   const parameters = [...(doc.paths[op.path]?.parameters ?? []), ...(operation?.parameters ?? [])];
-  const candidate = [...parameters].reverse().map((raw) => resolveDocRef(raw) as OpenAPIV3.ParameterObject)
-    .find((param) => param?.in === location && param.name === p.name);
+  return [...parameters].reverse().map(raw => resolveDocRef(raw) as OpenAPIV3.ParameterObject)
+    .find(param => param?.in === location && param.name === name);
+}
+
+function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
+  const candidate = sourceParameter(doc, op, p.name, location);
+  const media = Object.entries(candidate?.content ?? {});
+  if (location === 'query' && media.length === 1) {
+    return dereferenceSchema(media[0]![1].schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
+  }
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
   const composition = primitiveComposition(resolved);
@@ -868,7 +878,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       }
     }
     for (const p of op.queryParams) {
-      args.push({ name: p.name, location: 'query', required: p.required, schema: parameterArgSchema(doc, op, p, 'query'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      const media = Object.keys(sourceParameter(doc, op, p.name, 'query')?.content ?? {});
+      args.push({ name: p.name, location: 'query', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'query'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.headerParams) {
       args.push({ name: p.name, location: 'header', required: p.required, schema: parameterArgSchema(doc, op, p, 'header'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });

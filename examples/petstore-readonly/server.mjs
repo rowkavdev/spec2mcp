@@ -449,6 +449,11 @@ async function executeTool(manifest, tool, args, validateOutput) {
       if (value === undefined) continue;
       if (arg.location === 'query') {
         const wireName = arg.apiName ?? arg.name;
+        if (arg.parameterContentType) {
+          if (!isJsonType(baseContentType(arg.parameterContentType))) return errorResult(`Unsupported query content media type "${arg.parameterContentType}".`);
+          url.searchParams.append(wireName, JSON.stringify(value));
+          continue;
+        }
         const style = parameterStyle(arg);
         const parts = parameterParts(arg, value);
         for (const part of parts) {
