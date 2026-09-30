@@ -306,3 +306,21 @@ test('#111 the typeless object idiom keeps the OpenAPI object intent', async () 
   const props = showTurtle.outputSchema?.properties as Record<string, Record<string, unknown>>;
   assert.equal(props.id?.type, 'string');
 });
+
+const PATH_ITEMS_REF = fileURLToPath(new URL('./fixtures/path-items-ref-31.yaml', import.meta.url));
+
+test('#134 referenced path item objects keep their operations and wire paths', async () => {
+  const doc = await loadSpec(PATH_ITEMS_REF);
+  await init(doc);
+  const m = buildManifest(doc);
+  assert.equal(m.tools.length, 2, 'no operation dropped');
+  const byPath = new Map(m.tools.map((t) => [t.path, t]));
+  const items = byPath.get('/items');
+  assert.ok(items, 'operations indexed under the referencing path');
+  assert.equal(items.method, 'GET');
+  assert.equal(items.operationId, 'listItems', 'declared operationId survives');
+  const alt = byPath.get('/alt-items');
+  assert.ok(alt);
+  assert.equal(alt.method, 'POST');
+  assert.equal(alt.operationId, 'post_alt_items', 'operationId synthesized from the wire path');
+});

@@ -79,6 +79,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
 
   sanitizeComponentKeys(doc);
   hoistEscapedRefs(doc);
+  inlinePathItemRefs(doc);
 
   // OpenAPI 3.1 upgrades schemas to JSON Schema 2020-12, where `type` may be
   // a union array. Forge reads `type` as a single string, so collapse unions
@@ -224,6 +225,45 @@ function hoistEscapedRefs(doc: OpenAPIV3.Document): void {
     }
   };
   apply(doc);
+}
+
+/**
+ * Referenced Path Item Objects (#134). OpenAPI 3.1 allows a `paths` entry to
+ * be a $ref into `components.pathItems`; neither the ID repair below nor
+ * Forge's operation indexer follows that reference, so every operation under
+ * the path silently vanishes. Inline the target at load - a deep clone, since
+ * one component can back several paths and ID repair mutates per path -
+ * keeping the referencing path as the wire path, and preserving any sibling
+ * fields next to the $ref (3.1 permits summary/description overrides). An
+ * unresolvable reference is surfaced loudly instead of dropping the path.
+ */
+function inlinePathItemRefs(doc: OpenAPIV3.Document): void {
+  const root = doc as unknown as Record<string, unknown>;
+  const paths = root.paths as Record<string, unknown> | undefined;
+  if (!paths || typeof paths !== 'object') return;
+  const decodeSegment = (segment: string): string => segment.replaceAll('~1', '/').replaceAll('~0', '~');
+  for (const [path, pathItem] of Object.entries(paths)) {
+    if (!pathItem || typeof pathItem !== 'object') continue;
+    const ref = (pathItem as Record<string, unknown>).$ref;
+    if (typeof ref !== 'string') continue;
+    let target: unknown;
+    if (ref.startsWith('#/')) {
+      target = root;
+      for (const segment of ref.slice(2).split('/').map(decodeSegment)) {
+        if (!target || typeof target !== 'object') {
+          target = undefined;
+          break;
+        }
+        target = (target as Record<string, unknown>)[segment];
+      }
+    }
+    if (!target || typeof target !== 'object') {
+      console.error(`warning: cannot resolve referenced path item "${ref}" for path "${path}"; its operations will be missing.`);
+      continue;
+    }
+    const { $ref: _ref, ...siblings } = pathItem as Record<string, unknown>;
+    paths[path] = { ...structuredClone(target), ...siblings };
+  }
 }
 
 const JSON_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);

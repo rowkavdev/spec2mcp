@@ -1,0 +1,28 @@
+# #134: OpenAPI 3.1 allows a paths entry to be a $ref into
+# components.pathItems. Both operations must survive: one keeps its
+# declared operationId, the other gets one synthesized from the
+# referencing wire path.
+openapi: 3.1.0
+info:
+  title: Referenced Path Items API
+  version: 1.0.0
+servers:
+  - url: http://placeholder.invalid
+paths:
+  /items:
+    $ref: '#/components/pathItems/Items'
+  /alt-items:
+    $ref: '#/components/pathItems/NoIds'
+components:
+  pathItems:
+    Items:
+      get:
+        operationId: listItems
+        responses:
+          '200':
+            description: OK
+    NoIds:
+      post:
+        responses:
+          '200':
+            description: OK
