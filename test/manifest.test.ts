@@ -427,3 +427,24 @@ test('#153 unsupported required body field uses a whole-body contract, not parti
     name: { type: 'string' }, matrix: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
   } });
 });
+
+test('#178 reserved header Parameter Objects are ignored, including required flags', async () => {
+  const headers = ['Accept', 'content-type', 'AUTHORIZATION'];
+  const params = [
+    ...headers.map((name) => ({ name, in: 'header', required: true, schema: { type: 'string' } })),
+    { name: 'X-Trace', in: 'header', required: true, schema: { type: 'string' } },
+  ];
+  const doc = { openapi: '3.0.3', info: { title: 'Headers', version: '1' }, components: { schemas: {} },
+    paths: { '/': { get: { operationId: 'getX', parameters: params,
+      responses: { '200': { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } } },
+    } } },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'get_x');
+  assert.ok(tool);
+  assert.deepEqual(tool.args.map((arg) => arg.name), ['X-Trace']);
+  assert.deepEqual(tool.inputSchema.required, ['X-Trace']);
+  assert.deepEqual(tool.responseContentTypes, ['application/json']);
+});

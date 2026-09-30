@@ -23,3 +23,6 @@ vendored diff before committing; keep attribution and the license.
 - openapi-resolver.ts: include boolean items in direct request-body scalar
   arrays and carry their item type into the manifest (#153). Applied
   2026-09-30; drop if upstream adopts the same extraction.
+- openapi-resolver.ts: ignore reserved Accept, Content-Type and Authorization
+  header Parameter Objects (case-insensitive) per OAS (#178). Applied
+  2026-09-30; drop if upstream adopts the same filter.
