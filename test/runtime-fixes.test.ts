@@ -223,3 +223,17 @@ test('#174 XML declaration and UTF-16 BOM determine response decoding without HT
   assert.equal(utf16.isError, undefined);
   assert.match(utf16.content?.[0]?.text ?? '', /café/);
 });
+
+test('#139 a supplied zero-byte file is sent with its filename', async () => {
+  const before = seen.get('POST /upload')?.length ?? 0;
+  const res = await callTool('upload_file', { file: { contentBase64: '', filename: 'empty.txt', mimeType: 'text/plain' } });
+  assert.ok(!res.isError, res.content?.[0]?.text ?? 'tool call failed');
+  assert.equal(seen.get('POST /upload')?.length, before + 1);
+  const body = seen.get('POST /upload')!.at(-1)!.body.toString('utf8');
+  assert.match(body, /name="file"; filename="empty.txt"\r\nContent-Type: text\/plain\r\n\r\n\r\n--/);
+  for (const invalid of [null, {}, { contentBase64: null }, { contentBase64: 'AB==' }]) {
+    const rejected = await callTool('upload_file', { file: invalid });
+    assert.equal(rejected.isError, true);
+  }
+  assert.equal(seen.get('POST /upload')?.length, before + 1, 'invalid file values still never reach API');
+});
