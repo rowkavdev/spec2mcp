@@ -56,6 +56,17 @@ function mapScheme(name: string, def: OpenAPIV3.SecuritySchemeObject, envPrefix:
   return undefined;
 }
 
+/** Follow an internal `#/...` security-scheme reference, decoding JSON Pointer escapes. */
+function resolveSecuritySchemeRef(doc: OpenAPIV3.Document, ref: string): unknown {
+  if (!ref.startsWith('#/')) return undefined;
+  let cur: unknown = doc;
+  for (const segment of ref.slice(2).split('/').map((s) => s.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+    if (!cur || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[segment];
+  }
+  return cur;
+}
+
 /** Select an operation's first usable OR alternative; each object's keys are AND requirements.
  * An explicit empty security array (or empty requirement) means anonymous access.
  * For legacy specs with no security declaration, one declared scheme is inferred.
@@ -67,8 +78,18 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
   const definitions = doc.components?.securitySchemes ?? {};
   const mapped = new Map<string, AuthScheme>();
   for (const [name, def] of Object.entries(definitions)) {
-    if (def && !('$ref' in def)) {
-      const scheme = mapScheme(name, def, envPrefix);
+    if (!def) continue;
+    // A scheme may be a $ref alias to another scheme (#135). Follow internal
+    // references - with a hop limit against alias cycles - keeping the alias
+    // as the scheme name so the operation and its env var use the name the
+    // spec's security requirements reference. An unresolvable alias stays
+    // unmapped, and forOperation's missing-scheme warning names it.
+    let resolved: unknown = def;
+    for (let hop = 0; hop < 5 && resolved && typeof resolved === 'object' && '$ref' in resolved; hop++) {
+      resolved = resolveSecuritySchemeRef(doc, (resolved as { $ref: string }).$ref);
+    }
+    if (resolved && typeof resolved === 'object' && !('$ref' in resolved)) {
+      const scheme = mapScheme(name, resolved as OpenAPIV3.SecuritySchemeObject, envPrefix);
       if (scheme) mapped.set(name, scheme);
     }
   }

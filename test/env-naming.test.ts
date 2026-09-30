@@ -116,3 +116,36 @@ test('#106 suffix allocation never lands on another base name', async () => {
   assert.equal(byScheme.get('base_url'), 'R_API_BASE_URL_2', 'base URL variable is reserved');
   assert.equal(m.auth.baseUrlEnvVar, 'R_API_BASE_URL');
 });
+
+test('#135 referenced security scheme aliases map under their own name and env var', async () => {
+  const doc = {
+    openapi: '3.1.0',
+    info: { title: 'R API', version: '1.0.0' },
+    servers: [{ url: 'https://r.example.com' }],
+    paths: { '/items': { get: {
+      operationId: 'listItems',
+      security: [{ keyAlias: [] }],
+      responses: { '200': { description: 'OK' } },
+    } } },
+    components: {
+      schemas: {},
+      securitySchemes: {
+        keySource: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+        keyAlias: { $ref: '#/components/securitySchemes/keySource' },
+        other: { type: 'apiKey', in: 'header', name: 'X-Other' },
+      },
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = buildManifest(doc as any);
+  const names = m.auth.schemes.map((s) => s.schemeName);
+  assert.ok(names.includes('keyAlias'), 'alias mapped under its own name');
+  assert.deepEqual(m.tools[0]?.authSchemeNames, ['keyAlias']);
+  const alias = m.auth.schemes.find((s) => s.schemeName === 'keyAlias');
+  const source = m.auth.schemes.find((s) => s.schemeName === 'keySource');
+  assert.equal(alias?.kind, 'apikey-header', 'alias inherits the target scheme shape');
+  assert.notEqual(alias?.envVar, source?.envVar, 'alias gets its own deterministic env var');
+  assert.equal(m.auth.warnings.length, 0, 'no missing-scheme warning');
+});
