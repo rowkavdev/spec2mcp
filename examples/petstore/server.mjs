@@ -363,6 +363,16 @@ function compileOutputValidator(schema) {
 
 export { compileOutputValidator };
 
+/** Ignore quoted text; inspect numeric tokens only after JSON syntax validation. */
+function hasUnsafeIntegerToken(json) {
+  const unquoted = json.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  const tokens = unquoted.match(/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g) ?? [];
+  return tokens.some(token => {
+    const number = Number(token);
+    return !Number.isFinite(number) || (Number.isInteger(number) && !Number.isSafeInteger(number));
+  });
+}
+
 async function executeTool(manifest, tool, args, validateOutput) {
   // Only body parent/leaf paths can cover each other. Query/header/path
   // args with the same visible prefix are separate wire parameters (#123).
@@ -599,6 +609,12 @@ async function executeTool(manifest, tool, args, validateOutput) {
     try {
       decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       parsedJson = JSON.parse(decoded);
+      if (hasUnsafeIntegerToken(decoded)) {
+        return {
+          ...textResult(`${truncateText(decoded)}\n\n[precision warning: JSON numeric precision cannot be preserved in structured content; original JSON text retained]`),
+          ...(tool.outputSchema ? { isError: true } : {}),
+        };
+      }
     } catch {
       // A bounded preview is diagnostic only; replacement characters here
       // cannot turn malformed UTF-8 into a successful JSON response.
