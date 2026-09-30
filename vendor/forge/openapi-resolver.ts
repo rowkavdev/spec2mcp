@@ -527,7 +527,8 @@ function extractParameters(params: Parameter[] | undefined, location: 'path' | '
   if (!params) return [];
   return params
     .map(resolveParameter)
-    .filter((p): p is ResolvedParameter => p !== null && p.in === location)
+    .filter((p): p is ResolvedParameter => p !== null && p.in === location &&
+      !(location === 'header' && ['accept', 'content-type', 'authorization'].includes(p.name.toLowerCase())))
     .map((p) => {
       // Keep component identity separate from the resolved wire type.
       const schemaRef = componentSchemaName(p.schema);
