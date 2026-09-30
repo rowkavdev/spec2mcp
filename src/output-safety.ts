@@ -1,4 +1,4 @@
-/** Guard source inputs from Forge's recursive output-directory clean. */
+/** Guard source inputs from being mixed into the generated output directory. */
 import { realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 

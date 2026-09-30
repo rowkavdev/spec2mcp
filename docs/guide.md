@@ -60,7 +60,7 @@ spec2mcp <spec> [options]          # shorthand for generate
 
 | Flag | Applies to | Effect |
 | --- | --- | --- |
-| `-o, --out <dir>` | generate | Output directory; defaults to `./<name>-mcp`. Generation cleans/replaces that directory, including on a watch update. Do not keep hand edits there while regenerating. |
+| `-o, --out <dir>` | generate | Output directory; defaults to `./<name>-mcp`. Generation overwrites the files it owns there, including on a watch update, and preserves everything else (including `node_modules`, so installed dependencies survive regeneration). Do not keep hand edits to generated files there while regenerating. |
 | `--name <name>` | both | MCP server name; otherwise derived from the spec title. Also changes the prefix of generated auth and base-URL variable names. |
 | `--base-url <url>` | both | Override the first URL in the spec's root `servers` array. If neither is set, provide `<PREFIX>_BASE_URL` to the running server. |
 | `--env-prefix <prefix>` | both | Fixed prefix for generated auth and base-URL variable names, instead of deriving it from the spec title. Overlapping words collapse (`CLOUDFLARE_API` + `API_TOKEN` -> `CLOUDFLARE_API_TOKEN`). |

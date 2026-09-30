@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, access, mkdir, symlink } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, access, mkdir, symlink, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,6 +145,55 @@ test('#166 generated config persists a custom env prefix across regeneration', a
     const resaved = JSON.parse(await readFile(join(out, 'spec2mcp.config.json'), 'utf8'));
     assert.equal(resaved.envPrefix, 'SECRET', 'the round trip keeps the prefix in the emitted config');
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('#164 regeneration preserves installed dependencies and user files', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-preserve-'));
+  try {
+    const out = join(dir, 'demo-mcp');
+    await run(process.execPath, [TSX, CLI, 'generate', PETSTORE, '--out', out]);
+    const sdkFile = join(out, 'node_modules', '@modelcontextprotocol', 'sdk', 'package.json');
+    await mkdir(join(sdkFile, '..'), { recursive: true });
+    await writeFile(sdkFile, '{"name":"installed"}');
+    await writeFile(join(out, 'notes.txt'), 'hand kept');
+    const { stdout } = await run(process.execPath, [TSX, CLI, 'generate', PETSTORE, '--out', out]);
+    assert.equal(await readFile(sdkFile, 'utf8'), '{"name":"installed"}', 'installed dependencies survive regeneration');
+    assert.equal(await readFile(join(out, 'notes.txt'), 'utf8'), 'hand kept', 'files the generator does not own survive regeneration');
+    assert.match(stdout, /Next: cd .* && npm start/, 'an installed output skips the install step');
+    assert.doesNotMatch(stdout, /npm install && npm start/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('#164 watch regeneration preserves installed dependencies', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-watch-preserve-'));
+  let child;
+  try {
+    const spec = join(dir, 'spec.yaml');
+    const original = await readFile(PETSTORE, 'utf8');
+    await writeFile(spec, original);
+    const out = join(dir, 'demo-mcp');
+    child = spawn(process.execPath, [TSX, CLI, 'generate', spec, '--out', out, '--watch'], { stdio: 'ignore' });
+    const manifestPath = join(out, 'operations.json');
+    for (let i = 0; i < 200; i++) {
+      try { await access(manifestPath); break; } catch { await new Promise((r) => setTimeout(r, 50)); }
+    }
+    const initial = (await stat(manifestPath)).mtimeMs;
+    const sdkFile = join(out, 'node_modules', 'sdk-marker');
+    await mkdir(join(out, 'node_modules'), { recursive: true });
+    await writeFile(sdkFile, 'installed');
+    await writeFile(spec, `${original}\n# touched\n`);
+    for (let i = 0; i < 200; i++) {
+      if ((await stat(manifestPath)).mtimeMs !== initial) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.notEqual((await stat(manifestPath)).mtimeMs, initial, 'watch regenerated the project');
+    assert.equal(await readFile(sdkFile, 'utf8'), 'installed', 'installed dependencies survive a watch regeneration');
+  } finally {
+    child?.kill();
     await rm(dir, { recursive: true, force: true });
   }
 });
