@@ -137,8 +137,24 @@ export type ManifestOptions = OperationFilters & {
 
 const JSON_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
 
-/** Preserve mixed primitive branches Forge cannot express in ParameterInfo.
- * Unsupported/composite branches retain the existing adapted fallback. */
+/** Recover representable primitive unions (including null) and array item
+ * compositions from the loaded parameter schema when Forge narrows them. */
+function primitiveComposition(schema: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!schema) return undefined;
+  const key = Array.isArray(schema.oneOf) ? 'oneOf' : Array.isArray(schema.anyOf) ? 'anyOf' : undefined;
+  if (!key) return undefined;
+  const branches = schema[key] as unknown[];
+  if (branches.length === 0) return undefined;
+  const mapped = branches.map((branch) => {
+    const node = resolveDocRef(branch) as Record<string, unknown> | undefined;
+    if (!node || typeof node.type !== 'string' || !['string', 'number', 'integer', 'boolean', 'null'].includes(node.type)) return undefined;
+    const { $ref: _ref, nullable: _nullable, xml: _xml, ...constraints } = node;
+    return constraints;
+  });
+  if (mapped.some((branch) => branch === undefined)) return undefined;
+  return { [key]: mapped };
+}
+
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
   const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
   const parameters = [...(doc.paths[op.path]?.parameters ?? []), ...(operation?.parameters ?? [])];
@@ -146,24 +162,12 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
     .find((param) => param?.in === location && param.name === p.name);
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
-  const composition = resolved?.oneOf ? 'oneOf' : resolved?.anyOf ? 'anyOf' : undefined;
-  const branches = composition ? resolved?.[composition] : undefined;
-  if (Array.isArray(branches) && branches.length > 0) {
-    const types = branches.map((branch) => {
-      const schema = resolveDocRef(branch) as Record<string, unknown> | undefined;
-      return schema && typeof schema.type === 'string' && ['string', 'number', 'integer', 'boolean'].includes(schema.type)
-        ? schema.type : undefined;
-    });
-    if (types.every((type) => type !== undefined) && new Set(types).size > 1) {
-      const out: Record<string, unknown> = { [composition!]: branches.map((branch) => {
-        const schema = resolveDocRef(branch) as Record<string, unknown>;
-        // Keep primitive branch constraints such as enum/minimum/pattern.
-        const { $ref: _ref, nullable: _nullable, xml: _xml, ...constraints } = schema;
-        return constraints;
-      }) };
-      if (p.description) out.description = p.description;
-      return out;
-    }
+  const composition = primitiveComposition(resolved);
+  if (composition && new Set(((Object.values(composition)[0] as Record<string, unknown>[]).map((branch) => branch.type))).size > 1) return { ...composition, ...(p.description ? { description: p.description } : {}) };
+  if (resolved?.type === 'array') {
+    const items = resolveDocRef(resolved.items) as Record<string, unknown> | undefined;
+    const itemComposition = primitiveComposition(items);
+    if (itemComposition) return { type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) };
   }
   return argSchema(p);
 }

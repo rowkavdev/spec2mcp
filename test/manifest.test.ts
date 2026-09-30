@@ -463,7 +463,6 @@ test('#176 urlencoded encoding.headers is ignored without disabling the form fie
   assert.ok(tool);
   assert.deepEqual(tool.formEncoding, { name: { style: 'form', explode: true } });
 });
-
 test('#177 required readOnly multipart property is output-only and absent from upload args', async () => {
   const doc = { openapi: '3.0.3', info: { title: 'Files', version: '1' }, components: { schemas: {} }, paths: {
     '/photos': { post: { operationId: 'uploadPhotos', requestBody: { required: true, content: {
@@ -500,7 +499,6 @@ test('#173 +json request body keeps declared fields rather than a raw escape hat
   assert.deepEqual(tool.inputSchema.required, ['name']);
   assert.deepEqual(tool.args[1]?.schema, { anyOf: [{ type: 'string' }, { type: 'null' }] });
 });
-
 test('#173 +json body with an unflattenable required property falls back to a whole-body contract', async () => {
   const doc = { openapi: '3.0.3', info: { title: 'PatchMatrix', version: '1' }, components: { schemas: {} }, paths: {
     '/': { patch: { operationId: 'patchMatrix', requestBody: { required: true, content: {
@@ -519,4 +517,29 @@ test('#173 +json body with an unflattenable required property falls back to a wh
   assert.deepEqual(tool.args[0]?.schema, { type: 'object', required: ['matrix'], properties: {
     name: { type: 'string' }, matrix: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
   } });
+});
+
+test('#150 nullable mixed primitive query parameter preserves its null branch', async () => {
+  const doc = { openapi: '3.1.0', info: { title: 'Nullable', version: '1' }, components: { schemas: {} }, paths: {
+    '/x': { get: { operationId: 'getX', parameters: [{ name: 'key', in: 'query', required: true,
+      schema: { oneOf: [{ type: 'integer' }, { type: 'string' }, { type: 'null' }] } }],
+      responses: { '204': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const schema = buildManifest(doc as any).tools.find((t) => t.name === 'get_x')?.args.find((a) => a.name === 'key')?.schema;
+  assert.deepEqual(schema, { oneOf: [{ type: 'integer' }, { type: 'string' }, { type: 'null' }] });
+});
+test('#150 array query parameter preserves mixed item branches', async () => {
+  const doc = { openapi: '3.1.0', info: { title: 'Array', version: '1' }, components: { schemas: {} }, paths: {
+    '/x': { get: { operationId: 'getX', parameters: [{ name: 'keys', in: 'query', required: true,
+      schema: { type: 'array', items: { anyOf: [{ type: 'integer' }, { type: 'string' }] } } }],
+      responses: { '204': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const schema = buildManifest(doc as any).tools.find((t) => t.name === 'get_x')?.args.find((a) => a.name === 'keys')?.schema;
+  assert.deepEqual(schema, { type: 'array', items: { anyOf: [{ type: 'integer' }, { type: 'string' }] } });
 });
