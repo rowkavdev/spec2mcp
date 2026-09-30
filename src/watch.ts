@@ -9,7 +9,7 @@ export type WatchHandle = { close(): void };
 export async function watchSpec(
   input: string,
   generate: () => Promise<void>,
-  options: { pollIntervalMs?: number; requestTimeoutMs?: number; retryIntervalMs?: number; log?: (message: string) => void } = {},
+  options: { pollIntervalMs?: number; requestTimeoutMs?: number; retryIntervalMs?: number; additionalInputs?: string[]; log?: (message: string) => void } = {},
 ): Promise<WatchHandle> {
   const log = options.log ?? ((message: string) => console.error(message));
   const isUrl = /^https?:\/\//i.test(input);
@@ -26,7 +26,8 @@ export async function watchSpec(
   let fingerprint: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   let pollTimer: NodeJS.Timeout | undefined;
-  let watcher: FSWatcher | undefined;
+  const watchers: FSWatcher[] = [];
+  const additionalInputs = [...new Set((options.additionalInputs ?? []).map(file => resolve(file)))];
 
   async function digest(): Promise<string> {
     const bytes = isUrl
@@ -36,7 +37,13 @@ export async function watchSpec(
           return Buffer.from(await res.arrayBuffer());
         })()
       : await readFile(input);
-    return createHash('sha256').update(bytes).digest('hex');
+    const hash = createHash('sha256').update(bytes);
+    for (const file of additionalInputs) {
+      const extra = await readFile(file);
+      hash.update(JSON.stringify([file, extra.length]));
+      hash.update(extra);
+    }
+    return hash.digest('hex');
   }
 
   async function refresh(): Promise<void> {
@@ -67,17 +74,12 @@ export async function watchSpec(
 
   if (isUrl) {
     pollTimer = setInterval(() => { void refresh(); }, interval);
-  } else {
-    const absolute = resolve(input);
-    // Watch the parent, not the file: editors often replace the file by rename.
-    watcher = watchDirectory(dirname(absolute), (_event, filename) => {
-      if (filename === null || filename.toString() === basename(absolute)) {
-        clearTimeout(timer);
-        timer = setTimeout(() => { void refresh(); }, 100);
-      }
-    });
-    watcher.on('error', (err) => log(`Watch: ${err.message}`));
   }
+  const localFiles = [...new Set([...(isUrl ? [] : [resolve(input)]), ...additionalInputs])];
+  watchers.push(...watchLocalInputs(localFiles, () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { void refresh(); }, 100);
+  }, log));
   await refresh();
   log(`Watching ${input}${isUrl ? ` every ${interval / 1000}s` : ''} for changes (Ctrl+C to stop).`);
   return {
@@ -86,7 +88,23 @@ export async function watchSpec(
       clearTimeout(timer);
       clearTimeout(retryTimer);
       clearInterval(pollTimer);
-      watcher?.close();
+      for (const watcher of watchers) watcher.close();
     },
   };
+}
+
+function watchLocalInputs(files: string[], changed: () => void, log: (message: string) => void): FSWatcher[] {
+  const directories = new Map<string, Set<string>>();
+  for (const file of files) {
+    const names = directories.get(dirname(file)) ?? new Set<string>();
+    names.add(basename(file)); directories.set(dirname(file), names);
+  }
+  // Watch parents so atomic replacement is picked up for every generation input.
+  return [...directories].map(([directory, names]) => {
+    const watcher = watchDirectory(directory, (_event, filename) => {
+      if (filename === null || names.has(filename.toString())) changed();
+    });
+    watcher.on('error', (err) => log(`Watch: ${err.message}`));
+    return watcher;
+  });
 }

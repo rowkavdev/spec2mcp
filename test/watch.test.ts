@@ -126,3 +126,18 @@ test('#159 failed unchanged local generation retries and stops after success', a
     handle.close(); await new Promise(resolve => setTimeout(resolve, 60)); assert.equal(tries, 2);
   } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+test('#161 overlay-only edits and atomic replacement trigger generation', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-overlay-watch-'));
+  const file = join(dir, 'spec.yaml'), overlay = join(dir, 'curate.json');
+  let generated = 0, handle;
+  try {
+    await writeFile(file, 'root unchanged'); await writeFile(overlay, 'first');
+    handle = await watchSpec(file, async () => { generated++; }, { additionalInputs: [overlay], log() {} });
+    assert.equal(generated, 1);
+    await writeFile(overlay, 'second'); await until(() => generated === 2);
+    await writeFile(join(dir, 'new-overlay'), 'third'); await rename(join(dir, 'new-overlay'), overlay);
+    await until(() => generated === 3);
+    await writeFile(overlay, 'third'); await new Promise(resolve => setTimeout(resolve, 250)); assert.equal(generated, 3);
+  } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
+});

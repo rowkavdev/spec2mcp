@@ -183,7 +183,7 @@ async function main(): Promise<void> {
     if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: values.config }]);
     const seconds = values['poll-interval'] === undefined ? 30 : Number(values['poll-interval']);
     if (!Number.isFinite(seconds) || seconds <= 0) fail('--poll-interval must be a positive number of seconds');
-    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000 });
+    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000, additionalInputs: config.overlays ?? [] });
     process.once('SIGINT', () => { handle.close(); process.exit(0); });
     process.once('SIGTERM', () => { handle.close(); process.exit(0); });
   } else if (command === 'serve') {
