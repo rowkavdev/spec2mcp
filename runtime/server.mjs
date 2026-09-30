@@ -320,7 +320,6 @@ function isJsonType(contentType) {
 /** Types safely rendered as text (and truncated) rather than as binary content. */
 function isTextLikeType(contentType) {
   return (
-    contentType === '' ||
     isJsonType(contentType) ||
     contentType.startsWith('text/') ||
     contentType === 'application/xml' ||

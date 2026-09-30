@@ -62,6 +62,9 @@ before(async () => {
       } else if (url.startsWith('/text-valid')) {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         res.end('café ' + String.fromCharCode(0xfffd));
+      } else if (url.startsWith('/untyped')) {
+        res.writeHead(200);
+        res.end(Buffer.from([0xff, 0, 0x41]));
       } else if (url.startsWith('/xml-latin1')) {
         res.writeHead(200, { 'content-type': 'application/xml' });
         res.end(Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?><name>caf\xe9</name>', 'latin1'));
@@ -99,7 +102,7 @@ before(async () => {
   const doc = await loadSpec(FIXTURE);
   await init(doc);
   const manifest = buildManifest(doc, { baseUrl: apiBase });
-  for (const [name, path] of [['get_xml_latin1', '/xml-latin1'], ['get_xml_utf16', '/xml-utf16'], ['get_text_bad', '/text-bad'], ['get_text_bad_charset', '/text-bad-charset'], ['get_text_valid', '/text-valid']] as const) {
+  for (const [name, path] of [['get_xml_latin1', '/xml-latin1'], ['get_xml_utf16', '/xml-utf16'], ['get_text_bad', '/text-bad'], ['get_text_bad_charset', '/text-bad-charset'], ['get_text_valid', '/text-valid'], ['get_untyped', '/untyped']] as const) {
     manifest.tools.push({ name, operationId: name, method: 'GET', path, description: name,
       tags: [], args: [], authSchemeNames: [], inputSchema: { type: 'object', properties: {}, required: [] } });
   }
@@ -263,4 +266,13 @@ test('#171 invalid UTF-8 text is not a lossy success', async () => {
   const valid = await callTool('get_text_valid', {});
   assert.ok(!valid.isError);
   assert.equal(valid.content?.[0]?.text, 'café ' + String.fromCharCode(0xfffd));
+});
+
+test('#170 untyped binary response preserves original bytes', async () => {
+  const result = await callTool('get_untyped', {});
+  assert.ok(!result.isError);
+  const content = result.content?.[0] as unknown as { type: string; resource: { mimeType: string; blob: string } };
+  assert.equal(content.type, 'resource');
+  assert.equal(content.resource.mimeType, 'application/octet-stream');
+  assert.deepEqual(Buffer.from(content.resource.blob, 'base64'), Buffer.from([0xff, 0, 0x41]));
 });
