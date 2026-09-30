@@ -58,7 +58,9 @@ test('3.1 type unions collapse to Forge-readable types', async () => {
   assert.equal(petId?.schema.type, 'string');
   // ["integer", "null"] on a query param collapses to a plain integer argument.
   const verbose = getPet.args.find((a) => a.name === 'verbose');
-  assert.equal(verbose?.schema.type, 'number', '["integer", "null"] collapses to a number');
+  // Forge's metadata collapses the union to number; the manifest restores
+  // the declared integer type (#137).
+  assert.equal(verbose?.schema.type, 'integer', '["integer", "null"] collapses to integer in the manifest schema (#137)');
   // Mixed primitive branches survive Forge's adapted string fallback (#150).
   const include = getPet.args.find((a) => a.name === 'include');
   assert.deepEqual(include?.schema, { anyOf: [{ type: 'string' }, { type: 'integer' }], description: 'Extra data to include.' });
@@ -70,7 +72,7 @@ test('3.1 type unions collapse to Forge-readable types', async () => {
   // wraps it so input validation admits a valid null.
   assert.deepEqual(nickname?.schema, { anyOf: [{ type: 'string' }, { type: 'null' }] }, '["string", "null"] keeps its null branch');
   const microchip = createPet.args.find((a) => a.name === 'microchipId');
-  assert.deepEqual(microchip?.schema, { anyOf: [{ description: 'Optional chip id.', type: 'number' }, { type: 'null' }] }, '#81: nullable integer body property keeps its null branch');
+  assert.deepEqual(microchip?.schema, { anyOf: [{ description: 'Optional chip id.', type: 'integer' }, { type: 'null' }] }, '#81: nullable integer body property keeps its null branch (#137 restores the integer branch)');
 });
 
 test('custom jsonSchemaDialect is recorded on the manifest', async () => {
@@ -179,11 +181,11 @@ test('#81 nullability survives into the request input schema', async () => {
     'input schema admits a valid null',
   );
 
-  // Forge's parameter view stays adapted: the nullable query param is a
-  // plain number argument, unchanged by the marker.
+  // The nullable query param stays a plain numeric argument, with the
+  // declared integer type restored in the manifest schema (#137).
   const getPet = m.tools.find((t) => t.name === 'get_pet');
   const verbose = getPet?.args.find((a) => a.name === 'verbose');
-  assert.equal(verbose?.schema.type, 'number');
+  assert.equal(verbose?.schema.type, 'integer');
   assert.equal(verbose?.required, false);
 });
 

@@ -62,13 +62,53 @@ test('#130 numeric and boolean parameter enums keep their primitive types in the
   } as unknown as OpenAPIV3.Document;
   await init(doc);
   const schema = buildManifest(doc).tools[0]!.inputSchema as { properties: Record<string, Record<string, unknown>> };
-  assert.deepEqual(schema.properties.limit, { type: 'number', enum: [1, 2] });
+  assert.deepEqual(schema.properties.limit, { type: 'integer', enum: [1, 2] });
   assert.deepEqual(schema.properties.verbose, { type: 'boolean', enum: [true, false] });
-  assert.deepEqual(schema.properties.ids, { type: 'array', items: { type: 'number', enum: [1, 2] } });
+  assert.deepEqual(schema.properties.ids, { type: 'array', items: { type: 'integer', enum: [1, 2] } });
   assert.deepEqual(schema.properties.mode, { type: 'string', enum: ['1', '2'] }, 'string enums keep string values');
   const validate = compileOutputValidator(schema);
   assert.ok(validate({ limit: 1 }), 'numeric enum member accepted');
   assert.ok(validate({ limit: 2, verbose: true, ids: [1, 2], mode: '1' }), 'mixed typed and string enums accepted');
   assert.ok(!validate({ limit: 3 }), 'value outside the enum rejected');
   assert.ok(!validate({ limit: '1' }), 'string no longer satisfies a numeric enum');
+});
+
+test('#137 integer parameters and body leaves keep the integer type in the input schema', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Ints', version: '1' },
+    components: { schemas: {} },
+    paths: {
+      '/items': { get: {
+        operationId: 'getItems',
+        parameters: [
+          { name: 'page', in: 'query', required: true, schema: { type: 'integer' } },
+          { name: 'scores', in: 'query', schema: { type: 'array', items: { type: 'integer' } } },
+          { name: 'ratio', in: 'query', schema: { type: 'number' } },
+        ],
+        responses: { '200': { description: 'OK' } },
+      } },
+      '/things': { post: {
+        operationId: 'makeThing',
+        requestBody: { required: true, content: { 'application/json': { schema: {
+          type: 'object',
+          properties: { count: { type: 'integer' }, tags: { type: 'array', items: { type: 'integer' } } },
+        } } } },
+        responses: { '200': { description: 'OK' } },
+      } },
+    },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const m = buildManifest(doc);
+  const params = m.tools[0]!.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  assert.equal(params.properties.page?.type, 'integer');
+  assert.equal((params.properties.scores?.items as Record<string, unknown>)?.type, 'integer');
+  assert.equal(params.properties.ratio?.type, 'number', 'declared numbers stay numbers');
+  const body = m.tools[1]!.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  assert.equal(body.properties.count?.type, 'integer', 'body leaf keeps integer');
+  assert.equal((body.properties.tags?.items as Record<string, unknown>)?.type, 'integer', 'body array items keep integer');
+  const validate = compileOutputValidator(m.tools[0]!.inputSchema);
+  assert.ok(validate({ page: 1 }), 'integer accepted');
+  assert.ok(!validate({ page: 1.5 }), 'fractional value rejected for a scalar integer');
+  assert.ok(!validate({ page: 1, scores: [1.5] }), 'fractional value rejected for an array item');
+  assert.ok(validate({ page: 1, ratio: 1.5 }), 'fractional value still accepted for a declared number');
 });
