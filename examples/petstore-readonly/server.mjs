@@ -405,7 +405,12 @@ async function executeTool(manifest, tool, args, validateOutput) {
     if (arg.location === 'path') {
       // Check the encoded wire segment, not String(value): label-style empty
       // arrays/objects serialize as '.', which WHATWG URL then normalizes.
-      const segment = pathParameter(arg, value);
+      let segment;
+      try { segment = pathParameter(arg, value); }
+      catch (error) {
+        if (error instanceof URIError) return errorResult(`Invalid path argument "${arg.name}": malformed Unicode cannot be encoded.`);
+        throw error;
+      }
       if (segment === '.' || segment === '..') {
         return errorResult(`Invalid path argument "${arg.name}": dot segments are not allowed.`);
       }
