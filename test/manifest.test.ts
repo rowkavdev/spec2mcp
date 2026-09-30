@@ -463,3 +463,21 @@ test('#176 urlencoded encoding.headers is ignored without disabling the form fie
   assert.ok(tool);
   assert.deepEqual(tool.formEncoding, { name: { style: 'form', explode: true } });
 });
+
+test('#177 required readOnly multipart property is output-only and absent from upload args', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Files', version: '1' }, components: { schemas: {} }, paths: {
+    '/photos': { post: { operationId: 'uploadPhotos', requestBody: { required: true, content: {
+      'multipart/form-data': { schema: { type: 'object', required: ['photo', 'id'], properties: {
+        photo: { type: 'string', format: 'binary' }, id: { type: 'string', readOnly: true },
+      } } },
+    } }, responses: { '200': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'upload_photos');
+  assert.ok(tool);
+  assert.deepEqual(tool.args.map((a) => a.name), ['photo']);
+  assert.deepEqual(tool.inputSchema.required, ['photo']);
+  assert.equal(tool.args[0]?.binary, true);
+});

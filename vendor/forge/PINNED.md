@@ -26,3 +26,6 @@ vendored diff before committing; keep attribution and the license.
 - openapi-resolver.ts: ignore reserved Accept, Content-Type and Authorization
   header Parameter Objects (case-insensitive) per OAS (#178). Applied
   2026-09-30; drop if upstream adopts the same filter.
+- openapi-resolver.ts: exclude readOnly multipart request fields, including
+  required properties (#177). Applied 2026-09-30; drop if upstream adopts
+  request-side readOnly filtering.
