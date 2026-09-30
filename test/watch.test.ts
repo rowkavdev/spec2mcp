@@ -97,3 +97,20 @@ test('#187 close prevents generation after a pending URL digest', async () => {
     watcher?.close(); releasePoll(); api.close();
   }
 });
+
+test('#157 URL body timeout permits later healthy generations', async () => {
+  let hits = 0, generations = 0;
+  const api = createServer((_req, res) => {
+    hits++;
+    if (hits === 2) { res.writeHead(200); res.write('partial'); return; }
+    res.end(hits === 1 ? 'first' : 'second');
+  });
+  await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
+  const address = api.address(); assert.ok(address && typeof address !== 'string');
+  let handle;
+  try {
+    handle = await watchSpec(`http://127.0.0.1:${address.port}/spec`, async () => { generations++; }, { pollIntervalMs: 20, requestTimeoutMs: 60, log() {} });
+    await until(() => generations === 2);
+    assert.ok(hits >= 3);
+  } finally { handle?.close(); api.closeAllConnections(); await new Promise<void>(resolve => api.close(() => resolve())); }
+});
