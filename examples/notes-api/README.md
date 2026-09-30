@@ -28,7 +28,7 @@ The HTTP endpoint listens on localhost only. Keep it private; it has no client a
 }
 ```
 
-Settings are saved in `spec2mcp.config.json`. The server reads the name, base URL and filters at startup. To add back operations excluded at generation, regenerate the project.
+Settings are saved in `spec2mcp.config.json`. The server reads the name, base URL and filters at startup, and regenerating from this file keeps the same credential environment variable. To add back operations excluded at generation, regenerate the project.
 
 ## Tools
 

@@ -82,7 +82,7 @@ async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string
   for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
   await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
-  const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
+  const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, ...(config.envPrefix !== undefined ? { envPrefix: config.envPrefix } : {}), include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
   await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   await forge.finalize(outDir, files, { clean: true });
   const toolCount = JSON.parse(files.find((f) => f.path === 'operations.json')?.content ?? '{}').tools?.length ?? 0;
