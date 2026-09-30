@@ -77,3 +77,38 @@ test('#144 required object where {} is invalid falls back to a required whole-bo
   assert.ok(composed);
   assert.equal(composed.requiredEmptyObject, undefined);
 });
+
+test('#144 enum and const participate in the empty-validity proof', async () => {
+  const obj = (extra: Record<string, unknown>) => ({ type: 'object', properties: { note: { type: 'string' } }, ...extra });
+  const doc = { openapi: '3.0.3', info: { title: 'Enum Const', version: '1' }, components: { schemas: {} }, paths: {
+    '/enum-excludes': { post: { operationId: 'enumExcludes', requestBody: { required: true, content: { 'application/json': { schema:
+      obj({ enum: [{ note: 'hi' }] }) } } }, responses: { '204': { description: 'OK' } } } },
+    '/enum-includes': { post: { operationId: 'enumIncludes', requestBody: { required: true, content: { 'application/json': { schema:
+      obj({ enum: [{}, { note: 'hi' }] }) } } }, responses: { '204': { description: 'OK' } } } },
+    '/const-empty': { post: { operationId: 'constEmpty', requestBody: { required: true, content: { 'application/json': { schema:
+      obj({ const: {} }) } } }, responses: { '204': { description: 'OK' } } } },
+    '/const-nonempty': { post: { operationId: 'constNonempty', requestBody: { required: true, content: { 'application/json': { schema:
+      obj({ const: { note: 'hi' } }) } } }, responses: { '204': { description: 'OK' } } } },
+  } } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const tools = buildManifest(doc).tools;
+  const byName = (name: string) => {
+    const tool = tools.find((t) => t.name === name);
+    assert.ok(tool, name);
+    return tool;
+  };
+  // {} is not a member of the enum / not equal to the const: no flag, and the
+  // JSON bodies fall back to a required whole-body argument.
+  for (const name of ['enum_excludes', 'const_nonempty']) {
+    const tool = byName(name);
+    assert.equal(tool.requiredEmptyObject, undefined, name);
+    const whole = tool.args.find((a) => a.location === 'body');
+    assert.ok(whole, name);
+    assert.equal(whole.required, true, name);
+    assert.equal((whole.apiFieldPath ?? []).length, 0, name);
+  }
+  // {} is a member of the enum / equal to the const: the empty-body path stays.
+  for (const name of ['enum_includes', 'const_empty']) {
+    assert.equal(byName(name).requiredEmptyObject, true, name);
+  }
+});
