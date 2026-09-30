@@ -80,6 +80,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   sanitizeComponentKeys(doc);
   hoistEscapedRefs(doc);
   inlinePathItemRefs(doc);
+  breakAliasCycles(doc);
 
   // OpenAPI 3.1 upgrades schemas to JSON Schema 2020-12, where `type` may be
   // a union array. Forge reads `type` as a single string, so collapse unions
@@ -264,6 +265,92 @@ function inlinePathItemRefs(doc: OpenAPIV3.Document): void {
     const { $ref: _ref, ...siblings } = pathItem as Record<string, unknown>;
     paths[path] = { ...structuredClone(target), ...siblings };
   }
+}
+
+/**
+ * Reference alias cycles (#148). A $ref chain that never reaches a concrete
+ * schema (A -> B -> A) recurses the vendored resolver's alias walk until the
+ * process dies with RangeError: Maximum call stack size exceeded. Detect
+ * pure-alias chains at load and rewrite any ref that cannot reach a
+ * concrete target to a dangling pointer, so downstream handling matches
+ * unresolved-$ref behavior (#112: warnings, text-only tools) instead of a
+ * process-level crash. An alias is an object whose only key is $ref; a ref
+ * whose target is missing is already dangling and left alone.
+ */
+function breakAliasCycles(doc: OpenAPIV3.Document): void {
+  const root = doc as unknown as Record<string, unknown>;
+  const decodeSegment = (segment: string): string => segment.replaceAll('~1', '/').replaceAll('~0', '~');
+  const resolvePointer = (ref: string): unknown => {
+    if (!ref.startsWith('#/')) return undefined;
+    let cur: unknown = root;
+    for (const segment of ref.slice(2).split('/').map(decodeSegment)) {
+      if (!cur || typeof cur !== 'object') return undefined;
+      cur = (cur as Record<string, unknown>)[segment];
+    }
+    return cur;
+  };
+  const aliasTarget = (node: unknown): string | undefined => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    const rec = node as Record<string, unknown>;
+    const keys = Object.keys(rec);
+    return keys.length === 1 && typeof rec.$ref === 'string' && rec.$ref.startsWith('#/') ? rec.$ref : undefined;
+  };
+
+  // Collect every internal $ref in the document.
+  const refs = new Set<string>();
+  const collect = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) collect(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === '$ref' && typeof value === 'string' && value.startsWith('#/')) refs.add(value);
+      else collect(value);
+    }
+  };
+  collect(root);
+
+  const broken = new Set<string>();
+  for (const ref of refs) {
+    const chain: string[] = [];
+    const visited = new Set<string>();
+    let cur: string | undefined = ref;
+    let cyclic = false;
+    while (cur !== undefined) {
+      if (visited.has(cur)) {
+        cyclic = true;
+        break;
+      }
+      visited.add(cur);
+      chain.push(cur);
+      const target = resolvePointer(cur);
+      if (target === undefined) break; // already dangling: unresolved, not a cycle
+      cur = aliasTarget(target);
+    }
+    if (cyclic) for (const r of chain) broken.add(r);
+  }
+  if (broken.size === 0) return;
+
+  for (const ref of broken) {
+    console.error(`warning: reference alias cycle involving "${ref}" never reaches a concrete schema; treating it as unresolvable.`);
+  }
+  const rewrite = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) rewrite(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const rec = node as Record<string, unknown>;
+    for (const [key, value] of Object.entries(rec)) {
+      if (key === '$ref' && typeof value === 'string' && broken.has(value)) {
+        rec.$ref = `#/invalid-alias-cycle/${value.split('/').pop()}`;
+      } else {
+        rewrite(value);
+      }
+    }
+  };
+  rewrite(root);
 }
 
 const JSON_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
