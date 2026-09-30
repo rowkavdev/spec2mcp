@@ -93,13 +93,13 @@ function filePart(arg, value) {
   // Canonical base64 only: correct alphabet, no whitespace, padding solely at
   // the end. Node's decoder silently ignores invalid characters, so corrupt
   // uploads would otherwise be "accepted" as different bytes than supplied.
-  if (typeof contentBase64 !== 'string' || contentBase64.length === 0 || !BASE64_RE.test(contentBase64)) {
+  if (typeof contentBase64 !== 'string' || !BASE64_RE.test(contentBase64)) {
     throw new ToolArgumentError(
-      `Argument "${arg.name}": contentBase64 must be a non-empty canonical base64 string (no whitespace, correct padding).`,
+      `Argument "${arg.name}": contentBase64 must be a canonical base64 string (no whitespace, correct padding).`,
     );
   }
   const bytes = Buffer.from(contentBase64, 'base64');
-  if (bytes.length === 0 || bytes.toString('base64') !== contentBase64) {
+  if (bytes.toString('base64') !== contentBase64) {
     throw new ToolArgumentError(`Argument "${arg.name}": contentBase64 does not round-trip; refusing to upload corrupt data.`);
   }
   const filename = typeof value.filename === 'string' && value.filename.length > 0 ? value.filename : (arg.apiName ?? arg.name);
