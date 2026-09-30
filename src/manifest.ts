@@ -165,6 +165,34 @@ function primitiveComposition(schema: Record<string, unknown> | undefined): Reco
   return { [key]: mapped };
 }
 
+/**
+ * Primitive constraints Forge drops from its parameter metadata (#151).
+ * Copied from the source parameter schema so the tool input schema enforces
+ * the declared contract - a fixed path value cannot be misrouted by a
+ * client passing anything else. Wire-only annotations (readOnly/writeOnly,
+ * format, examples) are deliberately excluded; default and description are
+ * already carried through the adapted view.
+ */
+const PARAMETER_CONSTRAINTS = [
+  'const', 'pattern', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+  'minLength', 'maxLength', 'multipleOf', 'minItems', 'maxItems', 'uniqueItems',
+] as const;
+
+function applySourceConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!source || typeof source !== 'object') return schema;
+  for (const key of PARAMETER_CONSTRAINTS) {
+    if (source[key] !== undefined && schema[key] === undefined) schema[key] = source[key];
+  }
+  const items = schema.items as Record<string, unknown> | undefined;
+  const sourceItems = resolveDocRef(source.items) as Record<string, unknown> | undefined;
+  if (items && sourceItems && typeof sourceItems === 'object') {
+    for (const key of PARAMETER_CONSTRAINTS) {
+      if (sourceItems[key] !== undefined && items[key] === undefined) items[key] = sourceItems[key];
+    }
+  }
+  return schema;
+}
+
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
   const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
   const parameters = [...(doc.paths[op.path]?.parameters ?? []), ...(operation?.parameters ?? [])];
@@ -173,13 +201,21 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
   const composition = primitiveComposition(resolved);
-  if (composition && new Set(((Object.values(composition)[0] as Record<string, unknown>[]).map((branch) => branch.type))).size > 1) return { ...composition, ...(p.description ? { description: p.description } : {}) };
+  if (composition && new Set(((Object.values(composition)[0] as Record<string, unknown>[]).map((branch) => branch.type))).size > 1) {
+    // Constraints sibling to the composition (const, pattern, ranges) apply
+    // to every branch and must survive the mapping (review on #151).
+    return applySourceConstraints({ ...composition, ...(p.description ? { description: p.description } : {}) }, resolved);
+  }
   if (resolved?.type === 'array') {
     const items = resolveDocRef(resolved.items) as Record<string, unknown> | undefined;
     const itemComposition = primitiveComposition(items);
-    if (itemComposition) return { type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) };
+    if (itemComposition) {
+      // Same for an items composition: the items' own constraints and the
+      // outer array constraints both survive (review on #151).
+      return applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
+    }
   }
-  return restoreIntegerType(argSchema(p), resolved);
+  return applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
 }
 
 /**
