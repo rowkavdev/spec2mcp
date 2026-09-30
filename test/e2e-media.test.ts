@@ -254,3 +254,14 @@ test('error responses carry the status and a truncated text body', async () => {
   assert.match(text, /^HTTP 404 Not Found/);
   assert.match(text, /not found/);
 });
+
+
+test('#175 file part defaults to declared encoding.contentType', async () => {
+  seen.length = 0;
+  const result = await callTool('upload_pet_photo', {
+    petId: 7, photo: { contentBase64: Buffer.from('FAKEPNGBYTES').toString('base64'), filename: 'rex.png' },
+  });
+  assert.notEqual(result.isError, true);
+  assert.equal(seen.length, 1);
+  assert.match(seen[0]!.body.toString('utf8'), /name="photo"; filename="rex\.png"\r\ncontent-type: image\/png/i);
+});

@@ -103,7 +103,7 @@ function filePart(arg, value) {
     throw new ToolArgumentError(`Argument "${arg.name}": contentBase64 does not round-trip; refusing to upload corrupt data.`);
   }
   const filename = typeof value.filename === 'string' && value.filename.length > 0 ? value.filename : (arg.apiName ?? arg.name);
-  const mimeType = typeof value.mimeType === 'string' && value.mimeType.length > 0 ? value.mimeType : 'application/octet-stream';
+  const mimeType = typeof value.mimeType === 'string' && value.mimeType.length > 0 ? value.mimeType : (arg.defaultMimeType ?? 'application/octet-stream');
   return { bytes, filename, mimeType };
 }
 

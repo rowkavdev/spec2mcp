@@ -32,6 +32,8 @@ export type ToolArg = {
   apiFieldPath?: string[];
   /** True for multipart/form-data fields carrying file content (format: binary). */
   binary?: boolean;
+  /** Default file-part MIME type from multipart encoding.contentType. */
+  defaultMimeType?: string;
   /** OpenAPI parameter serialization (path/query/header). */
   style?: string;
   explode?: boolean;
@@ -732,8 +734,16 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         }
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
+      const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const encodings = body?.content?.['multipart/form-data']?.encoding;
       for (const field of op.multipart.fields) {
         const arg = multipartFieldArg(field);
+        const declaredMime = encodings?.[field.name]?.contentType;
+        if (arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
+          arg.defaultMimeType = declaredMime.trim();
+          const mimeSchema = (arg.schema.properties as Record<string, Record<string, unknown>>).mimeType;
+          mimeSchema!.description = `File MIME type (default: ${arg.defaultMimeType}).`;
+        }
         arg.required = bodyRequired && arg.required;
         args.push(arg);
       }
