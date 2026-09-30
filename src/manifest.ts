@@ -248,9 +248,9 @@ function bodySchemaAtPath(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath:
 
 /** A required JSON property with no writable tool path must not disappear
  * behind a partially flattened body. Fall back to a validated whole body. */
-function missingRequiredBodyField(doc: OpenAPIV3.Document, op: OperationInfo): boolean {
+function missingRequiredBodyField(doc: OpenAPIV3.Document, op: OperationInfo, mediaType: string): boolean {
   const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
-  const root = resolveDocRef(body?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
+  const root = resolveDocRef(body?.content?.[mediaType]?.schema) as Record<string, unknown> | undefined;
   if (!root || typeof root !== 'object') return false;
   const paths = op.bodyParams.map((p) => p.apiFieldPath);
   const seen = new Set<unknown>();
@@ -646,10 +646,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     // requestBody.required flag controls whether any body is needed at all.
     const bodyRequired = (resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined)?.required === true;
     const rootRequired = new Set(op.requestBodyRequired);
-    const wholeBodyRequired = contentType === 'application/json' && missingRequiredBodyField(doc, op);
+    const wholeBodyRequired = contentType !== undefined && isJsonMediaType(contentType) && missingRequiredBodyField(doc, op, contentType);
     let wholeBodySchema: Record<string, unknown> | undefined;
     if (wholeBodyRequired) {
-      const node = resolveDocRef((resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.['application/json']?.schema);
+      const node = resolveDocRef((resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema);
       try {
         wholeBodySchema = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
       } catch (error) {
