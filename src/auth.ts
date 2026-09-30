@@ -50,9 +50,13 @@ function mapScheme(name: string, def: OpenAPIV3.SecuritySchemeObject, envPrefix:
   if (def.type === 'apiKey' && def.in === 'query' && def.name) {
     return { kind: 'apikey-query', schemeName: name, envVar, queryName: def.name };
   }
-  if (def.type === 'oauth2' || def.type === 'openIdConnect' || def.type === 'http') {
+  if (def.type === 'oauth2' || def.type === 'openIdConnect') {
     return { kind: 'bearer', schemeName: name, envVar };
   }
+  // Other HTTP schemes (digest, NTLM, ...) need a challenge-response
+  // exchange, not a static Authorization header (#136). Mapping them to
+  // bearer would send a syntactically valid but semantically wrong header
+  // with no warning, so leave them unmapped and let the caller warn.
   return undefined;
 }
 
@@ -77,6 +81,7 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
 } {
   const definitions = doc.components?.securitySchemes ?? {};
   const mapped = new Map<string, AuthScheme>();
+  const unsupported: string[] = [];
   for (const [name, def] of Object.entries(definitions)) {
     if (!def) continue;
     // A scheme may be a $ref alias to another scheme (#135). Follow internal
@@ -91,6 +96,11 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
     if (resolved && typeof resolved === 'object' && !('$ref' in resolved)) {
       const scheme = mapScheme(name, resolved as OpenAPIV3.SecuritySchemeObject, envPrefix);
       if (scheme) mapped.set(name, scheme);
+      else {
+        const def = resolved as OpenAPIV3.SecuritySchemeObject;
+        const shape = def.type === 'http' ? `http ${def.scheme}` : String(def.type);
+        unsupported.push(`security scheme "${name}" uses unsupported auth (${shape}) and was not mapped; only HTTP bearer/basic, header/query API keys, and OAuth/OIDC bearer tokens are supported.`);
+      }
     }
   }
   // Two scheme names can normalize to the same env var ("api-key" and
@@ -117,7 +127,7 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
     scheme.envVar = candidate;
     allocated.add(candidate);
   }
-  const auth: AuthPlan = { schemes: [], warnings: [], baseUrlEnvVar: `${envPrefix}_BASE_URL` };
+  const auth: AuthPlan = { schemes: [], warnings: [...unsupported], baseUrlEnvVar: `${envPrefix}_BASE_URL` };
   const used = new Set<string>();
   const fallback = mapped.size === 1 ? [...mapped.keys()][0] : undefined;
 
