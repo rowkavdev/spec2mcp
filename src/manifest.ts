@@ -174,6 +174,24 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   return argSchema(p);
 }
 
+/**
+ * Forge's resolver stringifies enum members for its SDK-oriented metadata,
+ * so a { type: 'integer', enum: [1, 2] } parameter arrives as
+ * { type: 'number', enum: ['1', '2'] } - valid against nothing (#130). The
+ * runtime stringifies scalars at the HTTP serialization boundary anyway
+ * (server.mjs parameterParts), so restore the declared primitive type here.
+ * String-typed enums are left alone, and a value that does not parse keeps
+ * its original form rather than becoming NaN.
+ */
+function restoreEnumTypes(values: string[], type: string): unknown[] {
+  if (type !== 'integer' && type !== 'number' && type !== 'boolean') return values;
+  return values.map((v) => {
+    if (type === 'boolean') return v === 'true' ? true : v === 'false' ? false : v;
+    const n = Number(v);
+    return v.trim() !== '' && Number.isFinite(n) ? n : v;
+  });
+}
+
 function argSchema(p: ParameterInfo): Record<string, unknown> {
   const schema: Record<string, unknown> = {};
   const type = JSON_TYPES.has(p.type) ? p.type : 'string';
@@ -181,11 +199,11 @@ function argSchema(p: ParameterInfo): Record<string, unknown> {
   if (type === 'array') {
     const itemType = p.itemType && JSON_TYPES.has(p.itemType) && p.itemType !== 'array' ? p.itemType : 'string';
     const items: Record<string, unknown> = { type: itemType };
-    if (p.itemEnumValues && p.itemEnumValues.length > 0) items.enum = p.itemEnumValues;
+    if (p.itemEnumValues && p.itemEnumValues.length > 0) items.enum = restoreEnumTypes(p.itemEnumValues, itemType);
     schema.items = items;
   }
   if (type === 'object') schema.additionalProperties = true;
-  if (p.enumValues && p.enumValues.length > 0) schema.enum = p.enumValues;
+  if (p.enumValues && p.enumValues.length > 0) schema.enum = restoreEnumTypes(p.enumValues, type);
   if (p.default !== undefined) schema.default = p.default;
   if (p.description) schema.description = p.description;
   return schema;
