@@ -237,3 +237,13 @@ test('#139 a supplied zero-byte file is sent with its filename', async () => {
   }
   assert.equal(seen.get('POST /upload')?.length, before + 1, 'invalid file values still never reach API');
 });
+
+test('#155 malformed Unicode path is a tool error, not a protocol error', async () => {
+  const before = seen.get('POST /things/' + String.fromCharCode(0xd800))?.length ?? 0;
+  const reply = await rpc('tools/call', { name: 'replace_thing', arguments: { body: String.fromCharCode(0xd800), body_body: ['a'] } });
+  assert.equal(reply.error, undefined, 'argument error must not escape as MCP -32603');
+  const result = reply.result as ToolResult;
+  assert.equal(result.isError, true);
+  assert.match(result.content?.[0]?.text ?? '', /Invalid path argument/);
+  assert.equal(seen.get('POST /things/' + String.fromCharCode(0xd800))?.length ?? 0, before);
+});
