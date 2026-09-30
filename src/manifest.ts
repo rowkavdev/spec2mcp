@@ -790,6 +790,26 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     for (const p of op.pathParams) {
       args.push({ name: p.name, location: 'path', required: true, schema: parameterArgSchema(doc, op, p, 'path'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
+    // A path placeholder with no declared parameter would otherwise stay
+    // literal in the URL and hit the upstream as "{id}" (#152). Synthesize
+    // a required string argument for every undeclared placeholder, loudly.
+    const declaredPath = new Set(args.filter((a) => a.location === 'path').map((a) => a.name));
+    for (const match of op.path.matchAll(/\{([^}]+)\}/g)) {
+      const placeholder = match[1]!;
+      if (declaredPath.has(placeholder)) continue;
+      declaredPath.add(placeholder);
+      warnings.push(`${toolName}: path placeholder "${placeholder}" is not declared as a parameter; synthesized a required string argument (#152)`);
+      args.push({ name: placeholder, location: 'path', required: true, schema: { type: 'string' } });
+    }
+    // Inverse consistency (#211): a declared path parameter that matches no
+    // placeholder can never be substituted into the URL. Surface it in the
+    // same warning class instead of silently carrying a dead argument.
+    const placeholders = new Set([...op.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]));
+    for (const p of op.pathParams) {
+      if (!placeholders.has(p.name)) {
+        warnings.push(`${toolName}: declared path parameter "${p.name}" has no matching placeholder in the path (#211)`);
+      }
+    }
     for (const p of op.queryParams) {
       args.push({ name: p.name, location: 'query', required: p.required, schema: parameterArgSchema(doc, op, p, 'query'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
