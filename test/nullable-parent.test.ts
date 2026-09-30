@@ -21,6 +21,7 @@ const { compileOutputValidator } = (await import(
 )) as { compileOutputValidator: (schema: unknown) => (value: unknown) => boolean };
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/nullable-parent-31.yaml', import.meta.url));
+const NESTED_FIXTURE = fileURLToPath(new URL('./fixtures/nullable-parent-nested-31.yaml', import.meta.url));
 const RUNTIME = fileURLToPath(new URL('../runtime/server.mjs', import.meta.url));
 const OUT = fileURLToPath(new URL('../.tmp-e2e-nullable-parent/', import.meta.url));
 const join = (a: string, b: string) => `${a.replace(/\/+$/, '')}/${b}`;
@@ -152,4 +153,27 @@ test('#120 the required parent is enforced when nothing covers it', async () => 
   const res = await callTool('create_pet', {});
   assert.equal(res.isError, true);
   assert.match(res.content?.[0]?.text ?? '', /Missing required argument.*pet/);
+});
+
+test('#133 a nested nullable parent gets conditional requirements too', async () => {
+  const doc = await loadSpec(NESTED_FIXTURE);
+  await init(doc);
+  const manifest = buildManifest(doc, { baseUrl: 'http://placeholder.invalid' });
+  const tool = manifest.tools.find((t) => t.name === 'create_pet');
+  assert.ok(tool);
+  const parent = tool.args.find((a) => a.name === 'pet.address');
+  assert.ok(parent, 'nested parent arg retained');
+  assert.deepEqual(parent.schema.anyOf, [
+    { type: 'object', properties: { zip: { type: 'string' } }, required: ['zip'] },
+    { type: 'null' },
+  ]);
+  const inputSchema = tool.inputSchema as { required?: string[]; allOf?: Record<string, unknown>[] };
+  assert.ok(!inputSchema.required?.includes('pet.address.zip'), 'nested leaf not flatly required');
+  assert.ok(Array.isArray(inputSchema.allOf), 'conditional clauses present');
+  const validate = compileOutputValidator(inputSchema);
+  assert.ok(validate({ 'pet.address': null }), 'null route accepted');
+  assert.ok(validate({ 'pet.address.zip': 'x' }), 'leaf route accepted');
+  assert.ok(validate({ 'pet.address': { zip: 'x' } }), 'parent object accepted');
+  assert.ok(!validate({ 'pet.address': {} }), 'zip required when address is an object');
+  assert.ok(!validate({}), 'presence enforced');
 });

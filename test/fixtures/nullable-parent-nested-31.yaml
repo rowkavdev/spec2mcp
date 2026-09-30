@@ -1,0 +1,34 @@
+# #133: a required root object with a required, nullable nested object.
+# The nested parent's null route must stay reachable through the input
+# schema even though its flattened leaf is required.
+openapi: 3.1.0
+info:
+  title: Nested Nullable Parent API
+  version: 1.0.0
+servers:
+  - url: http://placeholder.invalid
+paths:
+  /pets:
+    post:
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pet]
+              properties:
+                pet:
+                  type: object
+                  required: [address]
+                  properties:
+                    address:
+                      type: ["object", "null"]
+                      required: [zip]
+                      properties:
+                        zip:
+                          type: string
+      responses:
+        '201':
+          description: Created

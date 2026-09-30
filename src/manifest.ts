@@ -822,7 +822,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
             },
           };
           args.push(arg);
-          if (depth === 1) nullableParents.push({ arg, node });
+          nullableParents.push({ arg, node });
         }
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
@@ -887,13 +887,20 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     // either route (parent arg or leaf args), so the input schema says the
     // same with conditional clauses: presence is the parent OR any
     // descendant, and each required descendant is itself OR an ancestor.
+    // This applies at every depth (#133): a nested nullable parent is
+    // scoped to its own field path, and because required-ness chains down
+    // through required arrays, a required descendant proves the parent's
+    // presence is required too.
     const conditional: Record<string, unknown>[] = [];
     const bodyArgs = args.filter((a) => a.location === 'body' && a.apiFieldPath && a.apiFieldPath.length > 0);
     for (const { arg: parent } of nullableParents) {
-      if (!parent.required) continue;
-      const root = parent.apiFieldPath![0];
-      const subtree = bodyArgs.filter((a) => a !== parent && a.apiFieldPath![0] === root);
+      const parentPath = parent.apiFieldPath!;
+      const subtree = bodyArgs.filter((a) =>
+        a !== parent &&
+        a.apiFieldPath!.length > parentPath.length &&
+        parentPath.every((seg, i) => a.apiFieldPath![i] === seg));
       if (subtree.length === 0) continue;
+      if (!parent.required && !subtree.some((a) => a.required)) continue;
       const drop = new Set([parent.name, ...subtree.filter((a) => a.required).map((a) => a.name)]);
       for (let i = requiredArgs.length - 1; i >= 0; i--) {
         if (drop.has(requiredArgs[i]!)) requiredArgs.splice(i, 1);
