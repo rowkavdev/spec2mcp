@@ -397,3 +397,11 @@ test('#153 required boolean-array body field is represented beside scalar siblin
   assert.deepEqual(flags.schema, { type: 'array', items: { type: 'boolean' } });
   assert.ok((tool.inputSchema.required as string[]).includes('flags'));
 });
+test('#150 mixed-type oneOf query preserves both declared input branches', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/mixed-union-parameter-31.json', import.meta.url)));
+  await init(doc);
+  const tool = buildManifest(doc).tools.find((t) => t.name === 'get_items');
+  assert.ok(tool);
+  assert.deepEqual(tool.args.find((a) => a.name === 'key')?.schema, { oneOf: [{ type: 'integer' }, { type: 'string' }] });
+  assert.deepEqual((tool.inputSchema.properties as Record<string, unknown>).key, { oneOf: [{ type: 'integer' }, { type: 'string' }] });
+});
