@@ -448,3 +448,18 @@ test('#178 reserved header Parameter Objects are ignored, including required fla
   assert.deepEqual(tool.inputSchema.required, ['X-Trace']);
   assert.deepEqual(tool.responseContentTypes, ['application/json']);
 });
+
+test('#176 urlencoded encoding.headers is ignored without disabling the form field', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Form', version: '1' }, components: { schemas: {} }, paths: {
+    '/': { post: { operationId: 'postForm', requestBody: { required: true, content: {
+      'application/x-www-form-urlencoded': { schema: { type: 'object', properties: { name: { type: 'string' } } },
+        encoding: { name: { style: 'form', explode: true, headers: { 'X-Test': { schema: { type: 'string' } } } } } },
+    } }, responses: { '200': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'post_form');
+  assert.ok(tool);
+  assert.deepEqual(tool.formEncoding, { name: { style: 'form', explode: true } });
+});
