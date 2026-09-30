@@ -135,10 +135,13 @@ function buildFormBody(tool, args) {
     if (arg.binary) {
       const part = filePart(arg, value);
       form.append(arg.apiName ?? arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
-    } else if (typeof value === 'object' && value !== null) {
-      form.append(arg.apiName ?? arg.name, JSON.stringify(value));
     } else {
-      form.append(arg.apiName ?? arg.name, String(value));
+      const text = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
+      if (arg.partContentType) {
+        form.append(arg.apiName ?? arg.name, new Blob([text], { type: arg.partContentType }));
+      } else {
+        form.append(arg.apiName ?? arg.name, text);
+      }
     }
     parts++;
   }
