@@ -488,6 +488,16 @@ async function executeTool(manifest, tool, args, validateOutput) {
       }
     }
   }
+  // requestBody.required is independent of property.required. A required
+  // object with only optional fields still needs an on-wire empty body.
+  if (body === undefined && tool.requiredEmptyObject) {
+    if (tool.contentType === 'multipart/form-data') {
+      body = new FormData();
+    } else {
+      body = '{}';
+      headers.set('content-type', tool.contentType ?? 'application/json');
+    }
+  }
 
   let res;
   try {

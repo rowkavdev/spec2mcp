@@ -58,6 +58,9 @@ before(async () => {
       tool('image', 'POST', [bodyArg()], 'image/png'),
       tool('plain', 'POST', [bodyArg()], 'text/plain'),
       tool('optional', 'POST', [{ name: 'name', location: 'body', apiFieldPath: ['name'], required: false, schema: { type: 'string' } }], 'application/json'),
+      { ...tool('requiredEmptyJson', 'POST', [{ name: 'note', location: 'body', apiFieldPath: ['note'], required: false, schema: { type: 'string' } }], 'application/json'), requiredEmptyObject: true },
+      { ...tool('requiredEmptyMultipart', 'POST', [{ name: 'note', location: 'body', apiFieldPath: [], required: false, schema: { type: 'string' } }], 'multipart/form-data'), requiredEmptyObject: true },
+      tool('optionalMultipart', 'POST', [{ name: 'note', location: 'body', apiFieldPath: [], required: false, schema: { type: 'string' } }], 'multipart/form-data'),
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
       tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
@@ -310,4 +313,17 @@ test('#176 ignored urlencoded encoding.headers does not block upstream form byte
   const request = seen.at(-1)!;
   assert.equal(request.body.toString('utf8'), 'name=Ada');
   assert.match(String(request.headers['content-type']), /^application\/x-www-form-urlencoded/);
+});
+
+
+test('#144 required empty JSON and multipart bodies are transmitted, optional multipart stays absent', async () => {
+  await call('requiredEmptyJson');
+  assert.equal(seen.at(-1)!.body.toString('utf8'), '{}');
+  assert.equal(seen.at(-1)!.headers['content-type'], 'application/json');
+  await call('requiredEmptyMultipart');
+  assert.match(String(seen.at(-1)!.headers['content-type']), /^multipart\/form-data; boundary=/);
+  assert.ok(seen.at(-1)!.body.length > 0);
+  await call('optionalMultipart');
+  assert.equal(seen.at(-1)!.body.length, 0);
+  assert.equal(seen.at(-1)!.headers['content-type'], undefined);
 });
