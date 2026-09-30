@@ -149,3 +149,48 @@ test('#135 referenced security scheme aliases map under their own name and env v
   assert.notEqual(alias?.envVar, source?.envVar, 'alias gets its own deterministic env var');
   assert.equal(m.auth.warnings.length, 0, 'no missing-scheme warning');
 });
+
+test('#136 an HTTP digest scheme is not silently mapped to bearer', async () => {
+  const doc = {
+    openapi: '3.0.3',
+    info: { title: 'Digest API', version: '1.0.0' },
+    servers: [{ url: 'https://digest.example.com' }],
+    components: {
+      schemas: {},
+      securitySchemes: { digestAuth: { type: 'http', scheme: 'digest' } },
+    },
+    security: [{ digestAuth: [] }],
+    paths: { '/': { get: { operationId: 'get', responses: { '200': { description: 'ok' } } } } },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = buildManifest(doc as any);
+  assert.equal(m.auth.schemes.length, 0, 'digest is not mapped to a static-header scheme');
+  assert.ok(
+    m.auth.warnings.some((w) => w.includes('digestAuth') && w.includes('unsupported')),
+    'a loud generation warning names the unsupported scheme',
+  );
+  assert.ok(!m.auth.schemes.some((s) => s.kind === 'bearer' && s.schemeName === 'digestAuth'), 'no Bearer header is sent for digest');
+});
+
+
+test('#136 unsupported aliases warn while #146 preserves all usable OR alternatives', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Alternatives', version: '1' },
+    components: { schemas: {}, securitySchemes: {
+      digest: { type: 'http', scheme: 'digest' },
+      digestAlias: { $ref: '#/components/securitySchemes/digest' },
+      bearer: { type: 'http', scheme: 'bearer' },
+      basic: { type: 'http', scheme: 'basic' },
+    } },
+    security: [{ digestAlias: [] }, { bearer: [] }, { basic: [] }],
+    paths: { '/': { get: { operationId: 'get', responses: { '200': { description: 'ok' } } } } },
+  };
+  await init(doc as any);
+  const m = buildManifest(doc as any);
+  assert.deepEqual(m.tools[0]?.authSchemeNames, ['bearer']);
+  assert.deepEqual(m.tools[0]?.authAlternatives, [['bearer'], ['basic']]);
+  assert.ok(m.auth.warnings.some(w => w.includes('digestAlias') && w.includes('unsupported')));
+  assert.deepEqual(m.auth.schemes.map(s => s.schemeName), ['bearer', 'basic']);
+});
