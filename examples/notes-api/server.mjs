@@ -133,8 +133,12 @@ function buildFormBody(tool, args) {
     const value = args[arg.name];
     if (value === undefined) continue;
     if (arg.binary) {
-      const part = filePart(arg, value);
-      form.append(arg.apiName ?? arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
+      if (arg.binaryArray && !Array.isArray(value)) throw new ToolArgumentError(`Argument "${arg.name}" must be an array of file objects.`);
+      const files = arg.binaryArray ? value : [value];
+      for (const file of files) {
+        const part = filePart(arg, file);
+        form.append(arg.apiName ?? arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
+      }
     } else {
       const text = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
       if (arg.partContentType) {

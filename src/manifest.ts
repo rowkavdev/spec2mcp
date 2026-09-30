@@ -33,6 +33,8 @@ export type ToolArg = {
   apiFieldPath?: string[];
   /** True for multipart/form-data fields carrying file content (format: binary). */
   binary?: boolean;
+  /** Repeated multipart file parts under one API field name. */
+  binaryArray?: boolean;
   /** Default file-part MIME type from multipart encoding.contentType. */
   defaultMimeType?: string;
   /** Explicit media type of a non-file multipart part. */
@@ -735,7 +737,7 @@ function schemaIsObject(schema: Record<string, unknown>): boolean {
  */
 function multipartFieldArg(field: MultipartField): ToolArg {
   if (field.isBinary) {
-    return {
+    const arg: ToolArg = {
       name: field.name,
       apiName: field.name,
       location: 'body',
@@ -754,6 +756,11 @@ function multipartFieldArg(field: MultipartField): ToolArg {
         additionalProperties: false,
       },
     };
+    if (field.type === 'array') {
+      arg.binaryArray = true;
+      arg.schema = { type: 'array', items: arg.schema, description: field.description };
+    }
+    return arg;
   }
   const schema: Record<string, unknown> = { description: field.description };
   if (field.type === 'object') {
@@ -1007,7 +1014,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         const declaredMime = encodings?.[field.name]?.contentType;
         if (arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
           arg.defaultMimeType = declaredMime.trim();
-          const mimeSchema = (arg.schema.properties as Record<string, Record<string, unknown>>).mimeType;
+          const fileSchema = arg.binaryArray ? arg.schema.items as Record<string, unknown> : arg.schema;
+          const mimeSchema = (fileSchema.properties as Record<string, Record<string, unknown>>).mimeType;
           mimeSchema!.description = `File MIME type (default: ${arg.defaultMimeType}).`;
         }
         if (!arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
