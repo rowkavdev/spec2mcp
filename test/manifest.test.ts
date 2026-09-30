@@ -543,3 +543,18 @@ test('#150 array query parameter preserves mixed item branches', async () => {
   const schema = buildManifest(doc as any).tools.find((t) => t.name === 'get_x')?.args.find((a) => a.name === 'keys')?.schema;
   assert.deepEqual(schema, { type: 'array', items: { anyOf: [{ type: 'integer' }, { type: 'string' }] } });
 });
+
+test('#154 top-level array body retains item and length constraints', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Array', version: '1' }, components: { schemas: {} }, paths: {
+    '/x': { post: { operationId: 'postX', requestBody: { required: true, content: { 'application/json': { schema:
+      { type: 'array', minItems: 1, maxItems: 3, items: { type: 'integer', minimum: 1 } },
+    } } }, responses: { '204': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'post_x');
+  assert.ok(tool);
+  assert.deepEqual(tool.args[0]?.schema, { type: 'array', minItems: 1, maxItems: 3,
+    items: { type: 'integer', minimum: 1 }, description: 'Request body (JSON array).' });
+});
