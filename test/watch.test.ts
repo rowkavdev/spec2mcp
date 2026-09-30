@@ -114,3 +114,15 @@ test('#157 URL body timeout permits later healthy generations', async () => {
     assert.ok(hits >= 3);
   } finally { handle?.close(); api.closeAllConnections(); await new Promise<void>(resolve => api.close(() => resolve())); }
 });
+
+test('#159 failed unchanged local generation retries and stops after success', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-retry-'));
+  const file = join(dir, 'spec.yaml'); let tries = 0, successes = 0; let handle;
+  try {
+    await writeFile(file, 'unchanged');
+    handle = await watchSpec(file, async () => { tries++; if (tries === 1) throw Error('transient'); successes++; }, { retryIntervalMs: 30, log() {} });
+    await until(() => successes === 1);
+    await new Promise(resolve => setTimeout(resolve, 120)); assert.equal(tries, 2);
+    handle.close(); await new Promise(resolve => setTimeout(resolve, 60)); assert.equal(tries, 2);
+  } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
+});
