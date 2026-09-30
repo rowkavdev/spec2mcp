@@ -371,3 +371,17 @@ test('#115 a __proto__ field name survives into input and output schemas', async
   // Own enumerable: the field serializes into the generated manifest.
   assert.ok(JSON.stringify(tool.inputSchema.properties).includes('__proto__'));
 });
+
+test('#149 OpenAPI 3.1 response $ref siblings survive in outputSchema', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/ref-siblings-31.json', import.meta.url)));
+  await init(doc);
+  const schema = buildManifest(doc).tools.find((t) => t.name === 'get_x')?.outputSchema;
+  assert.ok(schema);
+  assert.equal(schema.type, 'object');
+  const branches = schema.allOf as Record<string, unknown>[];
+  assert.equal(branches.length, 2, 'both referenced and sibling constraints must apply');
+  assert.deepEqual(branches[0]?.required, ['id']);
+  assert.deepEqual(branches[1]?.required, ['id', 'name']);
+  assert.equal((branches[0]?.properties as Record<string, Record<string, unknown>>).id?.type, 'integer');
+  assert.equal((branches[1]?.properties as Record<string, Record<string, unknown>>).name?.type, 'string');
+});
