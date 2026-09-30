@@ -132,24 +132,26 @@ function buildFormBody(tool, args) {
     if (arg.location !== 'body') continue;
     const value = args[arg.name];
     if (value === undefined) continue;
-    if (arg.binary) {
-      if (arg.binaryArray && !Array.isArray(value)) throw new ToolArgumentError(`Argument "${arg.name}" must be an array of file objects.`);
-      const files = arg.binaryArray ? value : [value];
-      for (const file of files) {
-        const part = filePart(arg, file);
-        form.append(arg.apiName ?? arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
-      }
-    } else {
-      const text = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
-      if (arg.partContentType) {
-        form.append(arg.apiName ?? arg.name, new Blob([text], { type: arg.partContentType }));
-      } else {
-        form.append(arg.apiName ?? arg.name, text);
-      }
-    }
+    if (arg.binary) appendFileParts(form, arg, value);
+    else appendTextPart(form, arg, value);
     parts++;
   }
   return parts > 0 ? form : undefined;
+}
+
+function appendFileParts(form, arg, value) {
+  if (arg.binaryArray && !Array.isArray(value)) throw new ToolArgumentError(`Argument "${arg.name}" must be an array of file objects.`);
+  const files = arg.binaryArray ? value : [value];
+  for (const file of files) {
+    const part = filePart(arg, file);
+    form.append(arg.apiName ?? arg.name, new Blob([part.bytes], { type: part.mimeType }), part.filename);
+  }
+}
+
+function appendTextPart(form, arg, value) {
+  const text = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
+  const part = arg.partContentType ? new Blob([text], { type: arg.partContentType }) : text;
+  form.append(arg.apiName ?? arg.name, part);
 }
 
 /** Encode flat OpenAPI form objects using per-property encoding rules. */
