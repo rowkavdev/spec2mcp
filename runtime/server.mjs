@@ -185,14 +185,34 @@ function formBody(value, encodings = {}) {
   return params.toString();
 }
 
+/** Pick the tool's active auth schemes (#146). Security requirement objects
+ * in an array are OR alternatives: when the manifest preserves them, use the
+ * first alternative whose schemes ALL have configured environment values, so
+ * a usable later route is not discarded with an unset first one. When no
+ * alternative is fully configured, keep the first (legacy behavior: send
+ * anonymously and let the API answer 401). */
+function selectAuthSchemes(manifest, tool) {
+  const all = manifest.auth?.schemes ?? [];
+  if (tool.authAlternatives !== undefined) {
+    const byName = new Map(all.map((scheme) => [scheme.schemeName, scheme]));
+    const configured = (names) => names.every((name) => {
+      const scheme = byName.get(name);
+      return scheme && process.env[scheme.envVar];
+    });
+    const chosen = tool.authAlternatives.find(configured) ?? tool.authAlternatives[0] ?? [];
+    return all.filter((scheme) => chosen.includes(scheme.schemeName));
+  }
+  // Older manifests have no per-tool selection and retain their root-level auth.
+  return tool.authSchemeNames === undefined
+    ? all
+    : all.filter((scheme) => tool.authSchemeNames.includes(scheme.schemeName));
+}
+
 /** Apply the manifest's auth schemes. Missing env vars are skipped, not
  * fatal: many APIs allow anonymous calls, and an API that needs auth answers
  * with its own 401. Unset vars are listed once at server start. */
 function applyAuth(manifest, tool, url, headers) {
-  // Older manifests have no per-tool selection and retain their root-level auth.
-  const schemes = tool.authSchemeNames === undefined
-    ? (manifest.auth?.schemes ?? [])
-    : (manifest.auth?.schemes ?? []).filter((scheme) => tool.authSchemeNames.includes(scheme.schemeName));
+  const schemes = selectAuthSchemes(manifest, tool);
   for (const scheme of schemes) {
     const value = process.env[scheme.envVar];
     if (!value) continue;
@@ -416,9 +436,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
     applyAuth(manifest, tool, url, headers);
     // Append only after every searchParams mutation: URLSearchParams re-encodes
     // the entire query, erasing reserved expansion. API-key params keep priority.
-    const activeQueryKeys = new Set((manifest.auth?.schemes ?? [])
-      .filter((scheme) => scheme.kind === 'apikey-query' && process.env[scheme.envVar] &&
-        (tool.authSchemeNames === undefined || tool.authSchemeNames.includes(scheme.schemeName)))
+    const activeQueryKeys = new Set(selectAuthSchemes(manifest, tool)
+      .filter((scheme) => scheme.kind === 'apikey-query' && process.env[scheme.envVar])
       .map((scheme) => scheme.queryName));
     for (const [key, item] of reservedQuery) {
       if (activeQueryKeys.has(key)) continue;

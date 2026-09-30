@@ -75,6 +75,11 @@ export type ToolDef = {
   inputSchema: Record<string, unknown>;
   /** Names of schemes used by this operation; [] explicitly sends no auth. */
   authSchemeNames: string[];
+  /** Fully mapped OR alternatives in spec order (#146); present only when
+   * more than one route exists. The runtime picks the first fully
+   * configured alternative; authSchemeNames stays the first for older
+   * runtimes. */
+  authAlternatives?: string[][];
 };
 
 export type WebhookInfo = {
@@ -898,6 +903,11 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       }
     }
 
+    const authSelection = forOperation(
+      doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods] as OpenAPIV3.OperationObject ?? {},
+      `${op.method.toUpperCase()} ${op.path}`,
+    );
+
     const description =
       op.description.split('\n')[0]?.trim() || `${op.method.toUpperCase()} ${op.path}`;
 
@@ -909,10 +919,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       method: op.method.toUpperCase(),
       path: op.path,
       args,
-      authSchemeNames: forOperation(
-        doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods] as OpenAPIV3.OperationObject ?? {},
-        `${op.method.toUpperCase()} ${op.path}`,
-      ),
+      authSchemeNames: authSelection.names,
+      // Emitted only with more than one OR alternative (#146); single-route
+      // tools keep the legacy shape and older runtimes read authSchemeNames.
+      ...(authSelection.alternatives.length > 1 ? { authAlternatives: authSelection.alternatives } : {}),
       inputSchema: {
         type: 'object',
         properties,

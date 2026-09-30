@@ -62,7 +62,7 @@ function mapScheme(name: string, def: OpenAPIV3.SecuritySchemeObject, envPrefix:
  */
 export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
   auth: AuthPlan;
-  forOperation: (operation: OpenAPIV3.OperationObject, label: string) => string[];
+  forOperation: (operation: OpenAPIV3.OperationObject, label: string) => { names: string[]; alternatives: string[][] };
 } {
   const definitions = doc.components?.securitySchemes ?? {};
   const mapped = new Map<string, AuthScheme>();
@@ -100,17 +100,22 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
   const used = new Set<string>();
   const fallback = mapped.size === 1 ? [...mapped.keys()][0] : undefined;
 
-  function forOperation(operation: OpenAPIV3.OperationObject, label: string): string[] {
+  function forOperation(operation: OpenAPIV3.OperationObject, label: string): { names: string[]; alternatives: string[][] } {
     const security = operation.security ?? doc.security;
-    // A missing declaration differs from security: [], which expressly disables auth.
+    // A missing declaration differs from security: security: [], which expressly disables auth.
     const alternatives = security === undefined
       ? (fallback ? [{ [fallback]: [] }] : [])
       : security;
     // Prefer a fully mapped OR alternative to a broken one, rather than
     // silently dropping part of an AND requirement when another route exists.
-    const complete = alternatives.find((requirement) =>
-      Object.keys(requirement).every((name) => mapped.has(name)));
-    const requirement = complete ?? alternatives[0];
+    // Every fully mapped alternative is preserved in spec order (#146): the
+    // runtime picks the first whose credentials are all configured, so a
+    // usable later route is not discarded with an unset first one.
+    const complete = alternatives
+      .map((requirement) => Object.keys(requirement).filter((name) => mapped.has(name)))
+      .filter((names, i) => names.length === Object.keys(alternatives[i]!).length);
+    const requirement = complete.length > 0 ? undefined : alternatives[0];
+    const groups: string[][] = [...complete];
     if (requirement) {
       const names: string[] = [];
       for (const name of Object.keys(requirement)) {
@@ -121,15 +126,18 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
           if (fallback && !names.includes(fallback)) names.push(fallback);
         }
       }
-      for (const name of names) {
+      groups.push(names);
+    }
+    const names = groups[0] ?? [];
+    for (const group of groups) {
+      for (const name of group) {
         if (!used.has(name)) {
           used.add(name);
           auth.schemes.push(mapped.get(name)!);
         }
       }
-      return names;
     }
-    return [];
+    return { names, alternatives: groups };
   }
   return { auth, forOperation };
 }
