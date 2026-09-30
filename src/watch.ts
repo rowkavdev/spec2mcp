@@ -9,12 +9,14 @@ export type WatchHandle = { close(): void };
 export async function watchSpec(
   input: string,
   generate: () => Promise<void>,
-  options: { pollIntervalMs?: number; log?: (message: string) => void } = {},
+  options: { pollIntervalMs?: number; requestTimeoutMs?: number; log?: (message: string) => void } = {},
 ): Promise<WatchHandle> {
   const log = options.log ?? ((message: string) => console.error(message));
   const isUrl = /^https?:\/\//i.test(input);
   const interval = options.pollIntervalMs ?? 30_000;
   if (!Number.isFinite(interval) || interval <= 0) throw new Error('Poll interval must be a positive number');
+  const requestTimeout = options.requestTimeoutMs ?? 30_000;
+  if (!Number.isFinite(requestTimeout) || requestTimeout <= 0) throw new Error('Request timeout must be a positive number');
   let closed = false;
   let running = false;
   let pending = false;
@@ -26,7 +28,7 @@ export async function watchSpec(
   async function digest(): Promise<string> {
     const bytes = isUrl
       ? await (async () => {
-          const res = await fetch(input);
+          const res = await fetch(input, { signal: AbortSignal.timeout(requestTimeout) });
           if (!res.ok) throw new Error(`Failed to fetch spec: HTTP ${res.status} from ${input}`);
           return Buffer.from(await res.arrayBuffer());
         })()
