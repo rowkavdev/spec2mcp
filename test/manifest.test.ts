@@ -612,3 +612,56 @@ test('#138 an operation cookie parameter replaces the inherited path-item one', 
   assert.equal(sessionArgs[0]?.required, false, 'the overriding optional parameter drops the inherited requirement');
   assert.equal(sessionArgs[0]?.schema.type, 'integer');
 });
+
+test('#152 an undeclared path placeholder becomes a required argument with a warning', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Items', version: '1' },
+    components: { schemas: {} },
+    paths: {
+      '/items/{id}': { get: { operationId: 'getItem', responses: { '200': { description: 'OK' } } } },
+      '/things/{name}': { get: {
+        operationId: 'getThing',
+        parameters: [{ name: 'name', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      } },
+    },
+  } as never;
+  await init(doc);
+  const m = buildManifest(doc);
+  const getItem = m.tools.find((t) => t.operationId === 'getItem');
+  const id = getItem?.args.find((a) => a.name === 'id');
+  assert.ok(id, 'undeclared placeholder is exposed as an argument');
+  assert.equal(id.location, 'path');
+  assert.equal(id.required, true, 'a path placeholder is always required');
+  assert.deepEqual(id.schema, { type: 'string' });
+  assert.ok(
+    (m.warnings ?? []).some((w) => w.includes('"id"') && w.includes('not declared')),
+    'the synthesis is loud',
+  );
+  const getThing = m.tools.find((t) => t.operationId === 'getThing');
+  assert.equal(getThing?.args.filter((a) => a.location === 'path').length, 1, 'a declared placeholder is not duplicated');
+  assert.ok(!(m.warnings ?? []).some((w) => w.includes('"name"')), 'no warning for a declared placeholder');
+});
+
+test('#211 a declared path parameter with no matching placeholder warns', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Items', version: '1' },
+    components: { schemas: {} },
+    paths: {
+      '/items/{id}': { get: {
+        operationId: 'getItem',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'ghost', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: { '200': { description: 'OK' } },
+      } },
+    },
+  } as never;
+  await init(doc);
+  const m = buildManifest(doc);
+  const tool = m.tools.find((t) => t.operationId === 'getItem');
+  assert.ok(tool?.args.some((a) => a.name === 'ghost' && a.location === 'path'), 'the declared parameter stays an argument');
+  assert.ok((m.warnings ?? []).some((w) => w.includes('"ghost"') && w.includes('no matching placeholder')), 'the dead parameter is surfaced');
+  assert.ok(!(m.warnings ?? []).some((w) => w.includes('"id"') && w.includes('no matching placeholder')), 'a matched placeholder stays quiet');
+});
