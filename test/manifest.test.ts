@@ -481,3 +481,22 @@ test('#177 required readOnly multipart property is output-only and absent from u
   assert.deepEqual(tool.inputSchema.required, ['photo']);
   assert.equal(tool.args[0]?.binary, true);
 });
+
+test('#173 +json request body keeps declared fields rather than a raw escape hatch', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Patch', version: '1' }, components: { schemas: {} }, paths: {
+    '/': { patch: { operationId: 'patchThing', requestBody: { required: true, content: {
+      'application/merge-patch+json': { schema: { type: 'object', required: ['name'], properties: {
+        name: { type: 'string' }, nickname: { type: 'string', nullable: true },
+      } } },
+    } }, responses: { '200': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'patch_thing');
+  assert.ok(tool);
+  assert.equal(tool.contentType, 'application/merge-patch+json');
+  assert.deepEqual(tool.args.map((a) => a.name), ['name', 'nickname']);
+  assert.deepEqual(tool.inputSchema.required, ['name']);
+  assert.deepEqual(tool.args[1]?.schema, { anyOf: [{ type: 'string' }, { type: 'null' }] });
+});

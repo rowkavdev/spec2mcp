@@ -1386,7 +1386,9 @@ function deriveOneOfConstraints(
  * nested objects, and derives oneOf constraints (conflicts/implies).
  */
 function extractBodyProperties(requestBody: Operation['requestBody']): BodyParamInfo[] {
-  const jsonSchema = requestBody?.content?.['application/json']?.schema;
+  const jsonContent = requestBody?.content?.['application/json'] ??
+    Object.entries(requestBody?.content ?? {}).find(([media]) => media.toLowerCase().split(';', 1)[0]!.trim().endsWith('+json'))?.[1];
+  const jsonSchema = jsonContent?.schema;
   if (!jsonSchema) return [];
 
   let resolved = resolveSchemaRef(jsonSchema);
