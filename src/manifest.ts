@@ -773,13 +773,32 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         args.push(arg);
       }
     } else if (op.hasRequestBody) {
-      // Free-form or non-JSON body: one raw "body" argument.
+      // A primitive JSON root is a raw body, but its source constraints still
+      // govern the tool argument. Non-JSON/free-form bodies retain the old view.
+      let rawSchema: Record<string, unknown> | undefined;
+      if (contentType && isJsonMediaType(contentType)) {
+        const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+        const node = body?.content?.[contentType]?.schema;
+        if (node && typeof node === 'object') {
+          let unresolved = false;
+          try {
+            const schema = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }, 0,
+              () => { unresolved = true; }, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
+            if (!unresolved) rawSchema = schema;
+            else warnings.push(`${toolName}: raw JSON body schema has an unresolved reference; using an unconstrained body argument`);
+          } catch (error) {
+            if (!(error instanceof SchemaTooLarge)) throw error;
+            warnings.push(`${toolName}: raw JSON body schema exceeds the input budget; using an unconstrained body argument`);
+          }
+        }
+      }
       args.push({
         name: 'body',
         location: 'body',
         apiFieldPath: [],
         required: bodyRequired,
-        schema: contentType === 'application/x-www-form-urlencoded'
+        schema: rawSchema ? { ...rawSchema, description: rawSchema.description ?? op.requestBodyDescription ?? 'Raw request body.' }
+          : contentType === 'application/x-www-form-urlencoded'
           ? { type: 'object', description: op.requestBodyDescription ?? 'Form fields; array serialization follows the spec encoding.' }
           : contentType && (contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml'))
             ? { type: 'string', description: op.requestBodyDescription ?? 'Pre-serialized XML request body.' }
