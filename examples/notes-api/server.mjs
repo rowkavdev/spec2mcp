@@ -381,7 +381,7 @@ async function executeTool(manifest, tool, args, validateOutput) {
     return errorResult(`Missing required argument(s): ${missing.join(', ')}`);
   }
 
-  const baseUrl = process.env[manifest.auth?.baseUrlEnvVar] || manifest.baseUrl;
+  const baseUrl = process.env[manifest.auth?.baseUrlEnvVar] || tool.baseUrl || manifest.baseUrl;
   if (!baseUrl) {
     return errorResult(
       `No base URL known for this API. Regenerate with --base-url, or set the ${manifest.auth?.baseUrlEnvVar} environment variable.`,
@@ -663,7 +663,12 @@ function withConfig(manifest, config) {
     ...manifest,
     serverName: config.name ?? manifest.serverName,
     baseUrl: config.baseUrl ?? manifest.baseUrl,
-    tools: manifest.tools.filter((tool) => selected(tool, config)),
+    tools: manifest.tools.filter((tool) => selected(tool, config)).map((tool) => {
+      // An explicit config base URL is a global operator override.
+      if (config.baseUrl === undefined) return tool;
+      const { baseUrl: _scopedBaseUrl, ...rest } = tool;
+      return rest;
+    }),
   };
 }
 

@@ -43,6 +43,8 @@ export type ToolArg = {
 };
 
 export type ToolDef = {
+  /** Effective operation/path server override; explicit generation overrides remain global. */
+  baseUrl?: string;
   name: string;
   description: string;
   operationId: string;
@@ -800,13 +802,22 @@ function collectResponseContentTypes(op: OperationInfo): string[] {
   return [...seen];
 }
 
+/** Resolve the declared defaults before a server URL enters routing. */
+function serverUrl(server: OpenAPIV3.ServerObject): string {
+  return server.url.replace(/\{([^}]+)\}/g, (_match, name: string) => {
+    const value = server.variables?.[name]?.default;
+    if (value === undefined) throw new Error(`Server variable "${name}" has no default`);
+    return String(value);
+  });
+}
+
 export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {}): Manifest {
   const info = doc.info ?? ({ title: 'API', version: '0.0.0' } as OpenAPIV3.Document['info']);
   const apiTitle = info.title ?? 'API';
   const envPrefix = opts.envPrefix ?? toEnvPrefix(opts.serverName ?? apiTitle);
   const { auth, forOperation } = buildAuthPlan(doc, envPrefix);
 
-  const firstServer = doc.servers?.[0]?.url ?? '';
+  const firstServer = doc.servers?.[0] ? serverUrl(doc.servers[0]) : '';
   const baseUrl = opts.baseUrl ?? firstServer;
 
   const operationIds = getAllOperationIds();
@@ -1073,6 +1084,9 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       }
     }
 
+    const pathItem = doc.paths[op.path] as OpenAPIV3.PathItemObject | undefined;
+    const operation = pathItem?.[op.method as OpenAPIV3.HttpMethods] as OpenAPIV3.OperationObject | undefined;
+    const scopedServer = operation?.servers?.[0] ?? pathItem?.servers?.[0];
     const authSelection = forOperation(
       doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods] as OpenAPIV3.OperationObject ?? {},
       `${op.method.toUpperCase()} ${op.path}`,
@@ -1088,6 +1102,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       tags: tagsById.get(operationId) ?? [],
       method: op.method.toUpperCase(),
       path: op.path,
+      ...(opts.baseUrl === undefined && scopedServer ? { baseUrl: serverUrl(scopedServer) } : {}),
       args,
       authSchemeNames: authSelection.names,
       // Emitted only with more than one OR alternative (#146); single-route
