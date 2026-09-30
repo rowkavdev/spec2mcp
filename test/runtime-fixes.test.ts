@@ -56,7 +56,13 @@ before(async () => {
       const list = seen.get(key) ?? [];
       list.push({ method: req.method ?? '', url, body: Buffer.concat(chunks) });
       seen.set(key, list);
-      if (url.startsWith('/data')) {
+      if (url.startsWith('/xml-latin1')) {
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        res.end(Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?><name>caf\xe9</name>', 'latin1'));
+      } else if (url.startsWith('/xml-utf16')) {
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        res.end(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('<name>café</name>', 'utf16le')]));
+      } else if (url.startsWith('/data')) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end('{not valid json');
       } else if (url.startsWith('/bad-utf8')) {
@@ -87,6 +93,10 @@ before(async () => {
   const doc = await loadSpec(FIXTURE);
   await init(doc);
   const manifest = buildManifest(doc, { baseUrl: apiBase });
+  for (const [name, path] of [['get_xml_latin1', '/xml-latin1'], ['get_xml_utf16', '/xml-utf16']] as const) {
+    manifest.tools.push({ name, operationId: name, method: 'GET', path, description: name,
+      tags: [], args: [], authSchemeNames: [], inputSchema: { type: 'object', properties: {}, required: [] } });
+  }
   const keyVar = manifest.auth.schemes[0]?.envVar;
   assert.ok(keyVar, 'fixture declares an apiKey scheme');
   await writeFile(join(OUT, 'operations.json'), JSON.stringify(manifest, null, 2));
@@ -202,4 +212,14 @@ test('#103 invalid UTF-8 in declared JSON is a tool error, not repaired success'
   assert.equal(result.structuredContent, undefined);
   assert.match(result.content?.[0]?.text ?? '', /not valid JSON.*invalid UTF-8/);
   assert.match(result.content?.[0]?.text ?? '', /\uFFFD/);
+});
+
+
+test('#174 XML declaration and UTF-16 BOM determine response decoding without HTTP charset', async () => {
+  const latin = await callTool('get_xml_latin1', {});
+  assert.equal(latin.isError, undefined);
+  assert.match(latin.content?.[0]?.text ?? '', /café/);
+  const utf16 = await callTool('get_xml_utf16', {});
+  assert.equal(utf16.isError, undefined);
+  assert.match(utf16.content?.[0]?.text ?? '', /café/);
 });
