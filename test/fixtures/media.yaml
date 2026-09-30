@@ -42,6 +42,9 @@ paths:
                 metadata:
                   type: object
                   description: Arbitrary metadata stored with the photo
+            encoding:
+              photo:
+                contentType: image/png
       responses:
         '200':
           description: ok
