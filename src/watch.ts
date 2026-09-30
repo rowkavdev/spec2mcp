@@ -42,6 +42,7 @@ export async function watchSpec(
         pending = false;
         try {
           const next = await digest();
+          if (closed) break;
           if (next !== fingerprint) {
             // Keep retrying an unchanged invalid spec until it generates successfully.
             await generate();

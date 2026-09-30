@@ -65,3 +65,35 @@ test('URL watch polls, retains last successful version and retries failed genera
     server.close();
   }
 });
+
+test('#187 close prevents generation after a pending URL digest', async () => {
+  let body = 'v1';
+  let hits = 0;
+  let pollStarted!: () => void;
+  let releasePoll!: () => void;
+  const started = new Promise<void>((resolve) => { pollStarted = resolve; });
+  const gate = new Promise<void>((resolve) => { releasePoll = resolve; });
+  const api = createServer(async (_req, res) => {
+    hits++;
+    if (hits === 2) { pollStarted(); await gate; }
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
+  const address = api.address();
+  assert.ok(address && typeof address !== 'string');
+  let generations = 0;
+  let watcher;
+  try {
+    watcher = await watchSpec(`http://127.0.0.1:${address.port}/spec`,
+      async () => { generations++; }, { pollIntervalMs: 20, log() {} });
+    assert.equal(generations, 1);
+    body = 'v2';
+    await started;
+    watcher.close();
+    releasePoll();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(generations, 1);
+  } finally {
+    watcher?.close(); releasePoll(); api.close();
+  }
+});
