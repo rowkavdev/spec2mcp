@@ -9,7 +9,7 @@ export type WatchHandle = { close(): void };
 export async function watchSpec(
   input: string,
   generate: () => Promise<void>,
-  options: { pollIntervalMs?: number; requestTimeoutMs?: number; log?: (message: string) => void } = {},
+  options: { pollIntervalMs?: number; requestTimeoutMs?: number; retryIntervalMs?: number; log?: (message: string) => void } = {},
 ): Promise<WatchHandle> {
   const log = options.log ?? ((message: string) => console.error(message));
   const isUrl = /^https?:\/\//i.test(input);
@@ -17,6 +17,9 @@ export async function watchSpec(
   if (!Number.isFinite(interval) || interval <= 0) throw new Error('Poll interval must be a positive number');
   const requestTimeout = options.requestTimeoutMs ?? 30_000;
   if (!Number.isFinite(requestTimeout) || requestTimeout <= 0) throw new Error('Request timeout must be a positive number');
+  const retryInterval = options.retryIntervalMs ?? 1_000;
+  if (!Number.isFinite(retryInterval) || retryInterval <= 0) throw new Error('Retry interval must be a positive number');
+  let retryTimer: NodeJS.Timeout | undefined;
   let closed = false;
   let running = false;
   let pending = false;
@@ -38,6 +41,7 @@ export async function watchSpec(
 
   async function refresh(): Promise<void> {
     if (closed || running) { pending = !closed; return; }
+    clearTimeout(retryTimer);
     running = true;
     try {
       do {
@@ -49,9 +53,11 @@ export async function watchSpec(
             // Keep retrying an unchanged invalid spec until it generates successfully.
             await generate();
             fingerprint = next;
+            clearTimeout(retryTimer);
           }
         } catch (err) {
           log(`Watch: ${err instanceof Error ? err.message : String(err)}`);
+          if (!isUrl && !closed) retryTimer = setTimeout(() => { void refresh(); }, retryInterval);
         }
       } while (pending && !closed);
     } finally {
@@ -78,6 +84,7 @@ export async function watchSpec(
     close() {
       closed = true;
       clearTimeout(timer);
+      clearTimeout(retryTimer);
       clearInterval(pollTimer);
       watcher?.close();
     },
