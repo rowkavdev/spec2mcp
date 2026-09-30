@@ -20,3 +20,6 @@ vendored diff before committing; keep attribution and the license.
   parameter flag through Parameter -> ParameterInfo (3 interface fields +
   1 extraction line, no behavior change to existing paths), for #108.
   Applied 2026-09-29; drop if upstream adopts the same carry.
+- openapi-resolver.ts: include boolean items in direct request-body scalar
+  arrays and carry their item type into the manifest (#153). Applied
+  2026-09-30; drop if upstream adopts the same extraction.
