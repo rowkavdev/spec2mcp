@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: Method Coverage API
+  version: 1.0.0
+servers:
+  - url: https://api.methods.test
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        '200':
+          description: ok
+    put:
+      operationId: putThing
+      responses:
+        '200':
+          description: ok
+    post:
+      operationId: postThing
+      responses:
+        '200':
+          description: ok
+    delete:
+      operationId: deleteThing
+      responses:
+        '200':
+          description: ok
+    options:
+      operationId: optionsThing
+      responses:
+        '204':
+          description: ok
+    head:
+      operationId: headThing
+      responses:
+        '200':
+          description: ok
+    patch:
+      operationId: patchThing
+      responses:
+        '200':
+          description: ok
+    trace:
+      operationId: traceThing
+      responses:
+        '200':
+          description: ok

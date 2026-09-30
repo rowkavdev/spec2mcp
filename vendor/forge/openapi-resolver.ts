@@ -35,6 +35,9 @@ interface PathItem {
   put?: Operation;
   patch?: Operation;
   delete?: Operation;
+  options?: Operation;
+  head?: Operation;
+  trace?: Operation;
 }
 
 interface RequestBody {
@@ -144,7 +147,7 @@ export interface OperationInfo {
   /** API path template, e.g., '/accounts/{account_id}/d1/database' */
   path: string;
   /** HTTP method */
-  method: 'get' | 'post' | 'put' | 'patch' | 'delete';
+  method: 'get' | 'post' | 'put' | 'patch' | 'delete' | 'options' | 'head' | 'trace';
   /** Operation description */
   description: string;
   /** Path parameters, e.g., ['account_id', 'database_id'] */
@@ -1618,7 +1621,7 @@ export function populateOperationMap(value: unknown): void {
   openapi = value;
   operationMap.clear();
   for (const [path, pathItem] of Object.entries(value.paths)) {
-    const methods: Array<'get' | 'post' | 'put' | 'patch' | 'delete'> = ['get', 'post', 'put', 'patch', 'delete'];
+    const methods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'] as const;
 
     for (const method of methods) {
       const operation = pathItem[method];

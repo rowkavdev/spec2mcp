@@ -27,7 +27,7 @@ const expectations: { refreshed: string; specs: Expectation[] } = JSON.parse(
   await readFile(new URL('./fixtures/compat/expectations.json', import.meta.url), 'utf8'),
 );
 
-const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD', 'TRACE']);
 
 function assertToolShape(m: Manifest): void {
   const names = m.tools.map((t) => t.name);

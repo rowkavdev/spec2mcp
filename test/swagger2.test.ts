@@ -44,7 +44,7 @@ test('Kubernetes aggregated swagger.json (2.0) converts end to end', async () =>
   const doc = await loadSpec(K8S2);
   await init(doc);
   const m = buildManifest(doc);
-  assert.equal(m.tools.length, 1190);
+  assert.equal(m.tools.length, 1202);
 });
 
 test('Swagger 2.0 external relative $refs resolve against the spec, not cwd (#51)', async () => {

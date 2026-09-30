@@ -15,7 +15,7 @@
       "file": "kubernetes.json",
       "url": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/v3/api__v1_openapi.json",
       "openapi": "3.0.0",
-      "tools": 236
+      "tools": 248
     },
     {
       "id": "spotify",
@@ -31,7 +31,7 @@
       "file": "vercel.json",
       "url": "https://openapi.vercel.sh/",
       "openapi": "3.0.3",
-      "tools": 431
+      "tools": 435
     },
     {
       "id": "discord",
