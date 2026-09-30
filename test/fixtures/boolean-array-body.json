@@ -1,0 +1,48 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Boolean Array Body",
+    "version": "1"
+  },
+  "servers": [
+    {
+      "url": "https://example.test"
+    }
+  ],
+  "paths": {
+    "/x": {
+      "post": {
+        "operationId": "postX",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "flags"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "flags": {
+                    "type": "array",
+                    "items": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  }
+}

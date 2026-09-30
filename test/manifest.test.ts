@@ -385,3 +385,15 @@ test('#149 OpenAPI 3.1 response $ref siblings survive in outputSchema', async ()
   assert.equal((branches[0]?.properties as Record<string, Record<string, unknown>>).id?.type, 'integer');
   assert.equal((branches[1]?.properties as Record<string, Record<string, unknown>>).name?.type, 'string');
 });
+test('#153 required boolean-array body field is represented beside scalar siblings', async () => {
+  const doc = await loadSpec(fileURLToPath(new URL('./fixtures/boolean-array-body.json', import.meta.url)));
+  await init(doc);
+  const tool = buildManifest(doc).tools.find((t) => t.name === 'post_x');
+  assert.ok(tool);
+  assert.ok(tool.args.some((a) => a.name === 'name'));
+  const flags = tool.args.find((a) => a.name === 'flags');
+  assert.ok(flags, 'required array must not disappear because name was extracted');
+  assert.equal(flags.required, true);
+  assert.deepEqual(flags.schema, { type: 'array', items: { type: 'boolean' } });
+  assert.ok((tool.inputSchema.required as string[]).includes('flags'));
+});

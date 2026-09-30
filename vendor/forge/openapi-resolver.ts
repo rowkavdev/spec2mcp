@@ -990,7 +990,7 @@ function createArrayBodyParam(
   if (!arraySchema.items) return undefined;
 
   const items = resolveSchemaRef(arraySchema.items);
-  const hasScalarItems = items.type === 'string' || items.type === 'number' || items.type === 'integer';
+  const hasScalarItems = items.type === 'string' || items.type === 'number' || items.type === 'integer' || items.type === 'boolean';
   const hasObjectItems = apiFieldPath.length === 1 && isObjectValuedSchema(arraySchema.items);
   if (!hasScalarItems && !hasObjectItems) return undefined;
 
@@ -1001,6 +1001,7 @@ function createArrayBodyParam(
     apiFieldPath,
   };
   if (hasObjectItems) info.itemType = 'object';
+  else if (hasScalarItems) info.itemType = items.type;
   if (arraySchema.description) info.description = arraySchema.description;
   if (arraySchema['x-sensitive'] === true || rawArraySchema['x-sensitive'] === true) {
     info.sensitive = true;
