@@ -558,3 +558,31 @@ test('#154 top-level array body retains item and length constraints', async () =
   assert.deepEqual(tool.args[0]?.schema, { type: 'array', minItems: 1, maxItems: 3,
     items: { type: 'integer', minimum: 1 }, description: 'Request body (JSON array).' });
 });
+test('top-level primitive JSON body retains minimum and type in input contract', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Number', version: '1' }, components: { schemas: {} }, paths: {
+    '/x': { post: { operationId: 'postX', requestBody: { required: true, content: { 'application/json': { schema: { type: 'number', minimum: 2 } } } },
+      responses: { '204': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'post_x');
+  assert.ok(tool);
+  assert.deepEqual(tool.args, [{ name: 'body', location: 'body', apiFieldPath: [], required: true,
+    schema: { type: 'number', minimum: 2, description: 'Raw request body.' } }]);
+});
+
+test('top-level referenced primitive body retains OpenAPI 3.1 ref sibling constraints', async () => {
+  const doc = { openapi: '3.1.0', info: { title: 'Score', version: '1' }, components: { schemas: {
+    Score: { type: 'integer', minimum: 0 },
+  } }, paths: {
+    '/score': { post: { operationId: 'postScore', requestBody: { required: true, content: {
+      'application/json': { schema: { $ref: '#/components/schemas/Score', maximum: 10 } },
+    } }, responses: { '204': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const schema = buildManifest(doc as any).tools.find((t) => t.name === 'post_score')?.args.find((a) => a.name === 'body')?.schema;
+  assert.deepEqual(schema, { allOf: [{ type: 'integer', minimum: 0 }, { maximum: 10 }], description: 'Raw request body.' });
+});
