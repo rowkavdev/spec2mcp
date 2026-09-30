@@ -17,3 +17,14 @@ webhooks:
       responses:
         '202':
           description: Accepted
+  orderReturned:
+    $ref: '#/components/pathItems/OrderReturnedHook'
+components:
+  pathItems:
+    OrderReturnedHook:
+      post:
+        operationId: orderReturned
+        summary: An order was returned
+        responses:
+          '202':
+            description: Accepted

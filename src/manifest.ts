@@ -117,7 +117,10 @@ function extractWebhooks(doc: OpenAPIV3.Document): WebhookInfo[] {
   const out: WebhookInfo[] = [];
   const webhooks = (doc as unknown as Record<string, unknown>).webhooks;
   if (typeof webhooks !== 'object' || webhooks === null) return out;
-  for (const [name, pathItem] of Object.entries(webhooks as Record<string, unknown>)) {
+  for (const [name, rawPathItem] of Object.entries(webhooks as Record<string, unknown>)) {
+    // A webhook entry may be a $ref to components/pathItems (#132); resolve
+    // it before walking methods or the webhook is silently dropped.
+    const pathItem = resolveDocRef(rawPathItem);
     if (!pathItem || typeof pathItem !== 'object') continue;
     for (const method of WEBHOOK_METHODS) {
       const op = (pathItem as Record<string, unknown>)[method] as OpenAPIV3.OperationObject | undefined;

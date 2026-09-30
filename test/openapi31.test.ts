@@ -86,12 +86,29 @@ test('webhook-only 3.1 spec generates zero tools without crashing', async () => 
   await init(doc);
   const m = buildManifest(doc);
   assert.equal(m.tools.length, 0);
-  assert.equal(m.webhooks.length, 2);
+  assert.equal(m.webhooks.length, 3);
   assert.deepEqual(
     m.webhooks.map((w) => w.name),
-    ['orderShipped', 'orderCancelled'],
+    ['orderShipped', 'orderCancelled', 'orderReturned'],
   );
   assert.equal(m.webhooks[1]?.operationId, undefined, 'webhook without operationId still recorded');
+  assert.equal(m.webhooks[2]?.operationId, 'orderReturned', '#132 referenced path item webhook recorded');
+});
+
+test('#132 a referenced webhook path item reaches the generated README', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-webhooks-'));
+  try {
+    const out = join(dir, 'events-mcp');
+    const { stdout } = await run(process.execPath, [TSX, CLI, 'generate', WEBHOOKS_ONLY, '--out', out]);
+    assert.match(stdout, /3 webhooks/);
+    const readme = await readFile(join(out, 'README.md'), 'utf8');
+    assert.match(readme, /## Webhooks/);
+    assert.match(readme, /orderReturned/);
+    const manifest = JSON.parse(await readFile(join(out, 'operations.json'), 'utf8'));
+    assert.equal(manifest.webhooks.length, 3);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('generate emits webhook and dialect sections and prints notes', async () => {
