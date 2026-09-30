@@ -500,3 +500,23 @@ test('#173 +json request body keeps declared fields rather than a raw escape hat
   assert.deepEqual(tool.inputSchema.required, ['name']);
   assert.deepEqual(tool.args[1]?.schema, { anyOf: [{ type: 'string' }, { type: 'null' }] });
 });
+
+test('#173 +json body with an unflattenable required property falls back to a whole-body contract', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'PatchMatrix', version: '1' }, components: { schemas: {} }, paths: {
+    '/': { patch: { operationId: 'patchMatrix', requestBody: { required: true, content: {
+      'application/merge-patch+json': { schema: { type: 'object', required: ['matrix'], properties: {
+        name: { type: 'string' }, matrix: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
+      } } },
+    } }, responses: { '200': { description: 'OK' } } } },
+  } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'patch_matrix');
+  assert.ok(tool);
+  assert.deepEqual(tool.args.map((a) => a.name), ['body']);
+  assert.deepEqual(tool.inputSchema.required, ['body']);
+  assert.deepEqual(tool.args[0]?.schema, { type: 'object', required: ['matrix'], properties: {
+    name: { type: 'string' }, matrix: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
+  } });
+});
