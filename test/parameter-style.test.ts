@@ -112,3 +112,55 @@ test('#137 integer parameters and body leaves keep the integer type in the input
   assert.ok(!validate({ page: 1, scores: [1.5] }), 'fractional value rejected for an array item');
   assert.ok(validate({ page: 1, ratio: 1.5 }), 'fractional value still accepted for a declared number');
 });
+
+test('#151 parameter const and primitive constraints survive into the input schema', async () => {
+  const doc = {
+    openapi: '3.1.0', info: { title: 'Consts', version: '1' },
+    components: { schemas: {} },
+    paths: { '/x/{mode}': { get: {
+      operationId: 'getX',
+      parameters: [
+        { name: 'mode', in: 'path', required: true, schema: { type: 'string', const: 'safe' } },
+        { name: 'level', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 5 } },
+        { name: 'tags', in: 'query', schema: { type: 'array', maxItems: 3, items: { type: 'string', const: 'a', minLength: 1 } } },
+      ],
+      responses: { '200': { description: 'OK' } },
+    } } },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  assert.equal(schema.properties.mode?.const, 'safe');
+  assert.equal(schema.properties.level?.minimum, 1);
+  assert.equal(schema.properties.level?.maximum, 5);
+  assert.equal(schema.properties.tags?.maxItems, 3);
+  assert.deepEqual(schema.properties.tags?.items, { type: 'string', const: 'a', minLength: 1 });
+  const validate = compileOutputValidator(schema);
+  assert.ok(validate({ mode: 'safe', level: 3, tags: ['a'] }), 'declared values pass');
+  assert.ok(!validate({ mode: 'bad' }), 'a different value fails the path const');
+  assert.ok(!validate({ mode: 'safe', level: 9 }), 'a value outside the range fails');
+  assert.ok(!validate({ mode: 'safe', tags: ['b'] }), 'an item outside the const fails');
+});
+
+test('#151 outer constraints survive on composition branches and array-items compositions', async () => {
+  const doc = {
+    openapi: '3.1.0', info: { title: 'Composed', version: '1' },
+    components: { schemas: {} },
+    paths: { '/y': { get: {
+      operationId: 'getY',
+      parameters: [
+        { name: 'mode', in: 'query', schema: { oneOf: [{ type: 'integer' }, { type: 'string' }], const: 'safe' } },
+        { name: 'vals', in: 'query', schema: { type: 'array', minItems: 2, items: { oneOf: [{ type: 'integer' }, { type: 'string' }], const: 'safe' } } },
+      ],
+      responses: { '200': { description: 'OK' } },
+    } } },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  assert.deepEqual(schema.properties.mode, { oneOf: [{ type: 'integer' }, { type: 'string' }], const: 'safe' }, 'the outer const survives on the composition root');
+  assert.deepEqual(schema.properties.vals, { type: 'array', minItems: 2, items: { oneOf: [{ type: 'integer' }, { type: 'string' }], const: 'safe' } }, 'array and items constraints survive the items composition');
+  const validate = compileOutputValidator(schema);
+  assert.ok(validate({ mode: 'safe', vals: ['safe', 'safe'] }), 'declared values pass');
+  assert.ok(!validate({ mode: 7 }), 'a non-const composition value fails');
+  assert.ok(!validate({ vals: ['safe', 'other'] }), 'an item outside the items const fails');
+  assert.ok(!validate({ vals: ['safe'] }), 'the outer minItems survives the composition path');
+});
