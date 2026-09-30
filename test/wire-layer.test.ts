@@ -61,6 +61,7 @@ before(async () => {
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
       tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
+      { ...tool('formIgnoredHeaders', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { name: { style: 'form', explode: true } } },
       { ...tool('formCsv', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'form', explode: false } } },
       { ...tool('formUnsupported', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'deepObject' } } },
       tool('queryArray', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
@@ -300,4 +301,13 @@ test('#118 repeated path placeholders each receive the validated encoded value',
   const single = await call('getFile', { name: 'a/b' });
   assert.equal(single.isError, undefined);
   assert.equal(seen.at(-1)!.url.split('?')[0], '/api/files/a%2Fb/data');
+});
+
+
+test('#176 ignored urlencoded encoding.headers does not block upstream form bytes', async () => {
+  const result = await call('formIgnoredHeaders', { body: { name: 'Ada' } });
+  assert.equal(result.isError, undefined);
+  const request = seen.at(-1)!;
+  assert.equal(request.body.toString('utf8'), 'name=Ada');
+  assert.match(String(request.headers['content-type']), /^application\/x-www-form-urlencoded/);
 });

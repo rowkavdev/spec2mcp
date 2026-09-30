@@ -817,8 +817,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         tool.formEncoding = Object.fromEntries(Object.entries(encodings).map(([name, encoding]) => [name, {
           ...(encoding.style !== undefined ? { style: encoding.style } : {}),
           ...(encoding.explode !== undefined ? { explode: encoding.explode } : {}),
-          ...(encoding.contentType !== undefined || encoding.headers !== undefined || encoding.allowReserved !== undefined
-            ? { unsupported: 'contentType, headers or allowReserved' } : {}),
+          ...(encoding.contentType !== undefined || encoding.allowReserved !== undefined
+            ? { unsupported: 'contentType or allowReserved' } : {}),
         }]));
       }
     }
