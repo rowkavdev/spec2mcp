@@ -179,7 +179,23 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
     const itemComposition = primitiveComposition(items);
     if (itemComposition) return { type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) };
   }
-  return argSchema(p);
+  return restoreIntegerType(argSchema(p), resolved);
+}
+
+/**
+ * Forge collapses integer to number in its parameter metadata, which makes
+ * the generated input schema admit fractional values the API rejects
+ * (#137). Recover the declared integer type from the source schema for the
+ * scalar and for array items; the resolver metadata stays as Forge's
+ * consumers expect it.
+ */
+function restoreIntegerType(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!source || typeof source !== 'object') return schema;
+  if (source.type === 'integer' && schema.type === 'number') schema.type = 'integer';
+  const items = schema.items as Record<string, unknown> | undefined;
+  const sourceItems = resolveDocRef(source.items) as Record<string, unknown> | undefined;
+  if (items && items.type === 'number' && sourceItems?.type === 'integer') items.type = 'integer';
+  return schema;
 }
 
 /**
@@ -768,9 +784,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         const required = bodyRequired && p.required && rootRequired.has(p.apiFieldPath[0] ?? '');
         // Nullable is not optional (#81): a required property may still be
         // null, so wrap the adapted view rather than loosening `required`.
+        const leafSchema = restoreIntegerType(argSchema(p), bodySchemaAtPath(doc, op, p.apiFieldPath));
         const schema = bodyPropertyNullable(doc, op, p.apiFieldPath)
-          ? { anyOf: [argSchema(p), { type: 'null' }] }
-          : argSchema(p);
+          ? { anyOf: [leafSchema, { type: 'null' }] }
+          : leafSchema;
         args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema });
       }
       // A nullable object parent flattens to leaves in Forge's view, so
