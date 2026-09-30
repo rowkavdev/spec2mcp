@@ -135,6 +135,37 @@ export type ManifestOptions = OperationFilters & {
 
 const JSON_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
 
+/** Preserve mixed primitive branches Forge cannot express in ParameterInfo.
+ * Unsupported/composite branches retain the existing adapted fallback. */
+function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
+  const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
+  const parameters = [...(doc.paths[op.path]?.parameters ?? []), ...(operation?.parameters ?? [])];
+  const candidate = [...parameters].reverse().map((raw) => resolveDocRef(raw) as OpenAPIV3.ParameterObject)
+    .find((param) => param?.in === location && param.name === p.name);
+  const source = candidate?.schema as Record<string, unknown> | undefined;
+  const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
+  const composition = resolved?.oneOf ? 'oneOf' : resolved?.anyOf ? 'anyOf' : undefined;
+  const branches = composition ? resolved?.[composition] : undefined;
+  if (Array.isArray(branches) && branches.length > 0) {
+    const types = branches.map((branch) => {
+      const schema = resolveDocRef(branch) as Record<string, unknown> | undefined;
+      return schema && typeof schema.type === 'string' && ['string', 'number', 'integer', 'boolean'].includes(schema.type)
+        ? schema.type : undefined;
+    });
+    if (types.every((type) => type !== undefined) && new Set(types).size > 1) {
+      const out: Record<string, unknown> = { [composition!]: branches.map((branch) => {
+        const schema = resolveDocRef(branch) as Record<string, unknown>;
+        // Keep primitive branch constraints such as enum/minimum/pattern.
+        const { $ref: _ref, nullable: _nullable, xml: _xml, ...constraints } = schema;
+        return constraints;
+      }) };
+      if (p.description) out.description = p.description;
+      return out;
+    }
+  }
+  return argSchema(p);
+}
+
 function argSchema(p: ParameterInfo): Record<string, unknown> {
   const schema: Record<string, unknown> = {};
   const type = JSON_TYPES.has(p.type) ? p.type : 'string';
@@ -565,13 +596,13 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const args: ToolArg[] = [];
     const nullableParents: { arg: ToolArg; node: Record<string, unknown> }[] = [];
     for (const p of op.pathParams) {
-      args.push({ name: p.name, location: 'path', required: true, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      args.push({ name: p.name, location: 'path', required: true, schema: parameterArgSchema(doc, op, p, 'path'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.queryParams) {
-      args.push({ name: p.name, location: 'query', required: p.required, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      args.push({ name: p.name, location: 'query', required: p.required, schema: parameterArgSchema(doc, op, p, 'query'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.headerParams) {
-      args.push({ name: p.name, location: 'header', required: p.required, schema: argSchema(p), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      args.push({ name: p.name, location: 'header', required: p.required, schema: parameterArgSchema(doc, op, p, 'header'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;

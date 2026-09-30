@@ -59,9 +59,9 @@ test('3.1 type unions collapse to Forge-readable types', async () => {
   // ["integer", "null"] on a query param collapses to a plain integer argument.
   const verbose = getPet.args.find((a) => a.name === 'verbose');
   assert.equal(verbose?.schema.type, 'number', '["integer", "null"] collapses to a number');
-  // Multi-type union degrades to the string fallback (documented behaviour).
+  // Mixed primitive branches survive Forge's adapted string fallback (#150).
   const include = getPet.args.find((a) => a.name === 'include');
-  assert.equal(include?.schema.type, 'string');
+  assert.deepEqual(include?.schema, { anyOf: [{ type: 'string' }, { type: 'integer' }], description: 'Extra data to include.' });
 
   const createPet = m.tools.find((t) => t.name === 'create_pet');
   assert.ok(createPet);
