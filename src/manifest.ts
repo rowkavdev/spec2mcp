@@ -675,12 +675,22 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     if (wholeBodyRequired) {
       args.push({ name: 'body', location: 'body', apiFieldPath: [], required: bodyRequired, schema: wholeBodySchema! });
     } else if (op.requestBodyIsArray) {
+      const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const raw = resolveDocRef(requestBody?.content?.[contentType ?? 'application/json']?.schema);
+      let schema: Record<string, unknown>;
+      try {
+        schema = dereferenceSchema(raw, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+      } catch (error) {
+        if (!(error instanceof SchemaTooLarge)) throw error;
+        warnings.push(`${toolName}: array body schema exceeds the input budget; using an unconstrained array argument`);
+        schema = { type: 'array', items: {} };
+      }
       args.push({
         name: 'body',
         location: 'body',
         apiFieldPath: [],
         required: bodyRequired,
-        schema: { type: 'array', items: {}, description: op.requestBodyDescription ?? 'Request body (JSON array).' },
+        schema: { ...schema, description: schema.description ?? op.requestBodyDescription ?? 'Request body (JSON array).' },
       });
     } else if (op.bodyParams.length > 0) {
       for (const p of op.bodyParams) {
