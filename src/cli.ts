@@ -6,7 +6,8 @@
  *
  * <spec> is a local file path or an http(s) URL, JSON or YAML.
  */
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { init } from '../vendor/forge/index.js';
 import { applyOverlays } from './overlay.js';
@@ -84,10 +85,13 @@ async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string
   await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, ...(config.envPrefix !== undefined ? { envPrefix: config.envPrefix } : {}), include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
   await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
-  await forge.finalize(outDir, files, { clean: true });
+  // Overwrite only the files the generator owns; a recursive clean used to
+  // erase node_modules and leave an installed server unstartable (#164).
+  await forge.finalize(outDir, files);
   const toolCount = JSON.parse(files.find((f) => f.path === 'operations.json')?.content ?? '{}').tools?.length ?? 0;
   console.log(`Generated ${toolCount} tools in ${outDir}`);
-  console.log(`Next: cd ${outDir} && npm install && npm start`);
+  const installed = await access(join(outDir, 'node_modules')).then(() => true, () => false);
+  console.log(installed ? `Next: cd ${outDir} && npm start` : `Next: cd ${outDir} && npm install && npm start`);
   if (probe.auth.schemes.length > 0) {
     console.log(`Auth: set ${probe.auth.schemes.map((s) => s.envVar).join(', ')} (see .env.example)`);
   }
