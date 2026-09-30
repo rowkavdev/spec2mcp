@@ -604,9 +604,10 @@ function multipartFieldArg(field: MultipartField): ToolArg {
 }
 
 /** True only when an empty object provably satisfies an object schema: no
- * required properties, no positive minProperties, and no composition keywords
- * (anyOf/oneOf/not/if) whose verdict on {} needs full validation, anywhere in
- * the allOf closure. Presence-triggered keywords (dependencies, propertyNames,
+ * required properties, no positive minProperties, no composition keywords
+ * (anyOf/oneOf/not/if) whose verdict on {} needs full validation, and no
+ * enum/const that excludes {}, anywhere in the allOf closure.
+ * Presence-triggered keywords (dependencies, propertyNames,
  * additionalProperties) cannot fail on {} and are ignored. Unresolvable or
  * cyclic references fail closed. */
 function emptyObjectSatisfies(schema: Record<string, unknown> | undefined, seen: Set<unknown> = new Set()): boolean {
@@ -614,6 +615,12 @@ function emptyObjectSatisfies(schema: Record<string, unknown> | undefined, seen:
   seen.add(schema);
   if (Array.isArray(schema.required) && schema.required.length > 0) return false;
   if (typeof schema.minProperties === 'number' && schema.minProperties > 0) return false;
+  // enum/const constrain the instance regardless of properties: {} must be a
+  // member, which for JSON Schema equality means exactly the empty object.
+  const isEmptyPlainObject = (value: unknown): boolean =>
+    typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0;
+  if (schema.const !== undefined && !isEmptyPlainObject(schema.const)) return false;
+  if (schema.enum !== undefined && (!Array.isArray(schema.enum) || !schema.enum.some(isEmptyPlainObject))) return false;
   if (schema.anyOf !== undefined || schema.oneOf !== undefined || schema.not !== undefined || schema.if !== undefined) return false;
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
