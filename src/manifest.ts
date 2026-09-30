@@ -430,6 +430,46 @@ function jsonLength(value: unknown, budget: SchemaBudget): number {
   return JSON.stringify(value)?.length ?? 0;
 }
 
+/**
+ * OpenAPI `writeOnly` marks a request-only property: a valid response never
+ * has to contain it, so it must not stay in a response schema's `required`
+ * (#141). Strip it recursively after dereferencing; `readOnly` stays - a
+ * response may and must carry those fields. The dereferenced output is a
+ * fresh tree, so mutation is safe.
+ */
+const SCHEMA_SINGLE_KEYS = new Set(['items', 'additionalItems', 'additionalProperties', 'contains', 'propertyNames', 'not', 'if', 'then', 'else', 'unevaluatedItems', 'unevaluatedProperties']);
+const SCHEMA_ARRAY_KEYS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
+const SCHEMA_MAP_KEYS = new Set(['properties', 'patternProperties', 'dependentSchemas', '$defs', 'definitions']);
+
+function stripWriteOnlyRequired(node: unknown): void {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+  const rec = node as Record<string, unknown>;
+  const properties = rec.properties as Record<string, unknown> | undefined;
+  const required = rec.required;
+  if (Array.isArray(required) && properties && typeof properties === 'object') {
+    const kept = required.filter((name) => {
+      const prop = properties[name as string] as Record<string, unknown> | undefined;
+      return !prop || typeof prop !== 'object' || prop.writeOnly !== true;
+    });
+    if (kept.length === 0) delete rec.required;
+    else rec.required = kept;
+  }
+  // Recurse only into schema-bearing keywords. Walking every value reached
+  // into const/enum/default/examples literal data and rewrote it (review on
+  // #141).
+  for (const key of SCHEMA_SINGLE_KEYS) stripWriteOnlyRequired(rec[key]);
+  for (const key of SCHEMA_ARRAY_KEYS) {
+    const value = rec[key];
+    if (Array.isArray(value)) for (const sub of value) stripWriteOnlyRequired(sub);
+  }
+  for (const key of SCHEMA_MAP_KEYS) {
+    const value = rec[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const sub of Object.values(value)) stripWriteOnlyRequired(sub);
+    }
+  }
+}
+
 function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0, onUnresolved?: (ref: string) => void, refSiblings = false): unknown {
   if (Array.isArray(node)) {
     charge(budget, 2); // brackets
@@ -1031,6 +1071,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       warnings.push(`${toolName}: response schema $ref "${ref}" could not be resolved; the tool stays text-only (#112)`);
     });
     if (responseSchema) {
+      stripWriteOnlyRequired(responseSchema);
       // The advertised top-level type must be the literal "object" (MCP
       // clients validate it). MCP requires object-shaped structured
       // content, so arrays, primitives and root-nullable schemas (#92: a
