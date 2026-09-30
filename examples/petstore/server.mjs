@@ -608,7 +608,13 @@ async function executeTool(manifest, tool, args, validateOutput) {
   }
   let rendered;
   try { rendered = isJsonType(contentType) ? JSON.stringify(parsedJson, null, 2) : renderText(bytes, contentType, contentTypeHeader); }
-  catch { return errorResult(`HTTP ${res.status} ${res.statusText} declared XML but its text encoding could not be decoded.`); }
+  catch {
+    if (isXmlType(contentType)) {
+      return errorResult(`HTTP ${res.status} ${res.statusText} declared XML but its text encoding could not be decoded.`);
+    }
+    const charset = declaredCharset(contentTypeHeader);
+    return errorResult(`HTTP ${res.status} ${res.statusText} response text could not be decoded${charset ? ` with the declared charset "${charset}"` : ''}.`);
+  }
   const result = textResult(truncateText(rendered));
   // Successful calls advertising outputSchema must have valid structuredContent.
   // A drifted, truncated or non-JSON upstream response stays visible as a tool
@@ -661,11 +667,20 @@ function withConfig(manifest, config) {
   };
 }
 
+function isXmlType(contentType) {
+  return contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml');
+}
+
+/** The charset parameter of a content-type header, quotes stripped. */
+function declaredCharset(contentTypeHeader) {
+  const match = /(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i.exec(contentTypeHeader ?? '');
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
 /** Decode XML without replacement characters. HTTP charset takes precedence;
  * otherwise use BOM, then the ASCII-compatible XML declaration. */
 function decodeXml(bytes, contentTypeHeader) {
-  const declaredCharset = /(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i.exec(contentTypeHeader ?? '');
-  let encoding = declaredCharset?.[1] ?? declaredCharset?.[2] ?? declaredCharset?.[3];
+  let encoding = declaredCharset(contentTypeHeader);
   let offset = 0;
   if (!encoding) {
     if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) { encoding = 'utf-8'; offset = 3; }
@@ -679,10 +694,20 @@ function decodeXml(bytes, contentTypeHeader) {
   return new TextDecoder(encoding, { fatal: true }).decode(bytes.subarray(offset));
 }
 
+/** Decode non-XML text. A declared charset is honored and decoded strictly:
+ * an unsupported label or invalid bytes throw, which the caller surfaces as
+ * an explicit tool error instead of silently replacing bytes (#131).
+ * Undeclared text keeps UTF-8 rendering. */
+function decodeDeclaredText(bytes, contentTypeHeader) {
+  const charset = declaredCharset(contentTypeHeader);
+  if (charset) return new TextDecoder(charset, { fatal: true }).decode(bytes);
+  return bytes.toString('utf8');
+}
+
 /** Decode a text response body, pretty-printing JSON payloads. */
 function renderText(bytes, contentType, contentTypeHeader) {
-  const text = contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml')
-    ? decodeXml(bytes, contentTypeHeader) : bytes.toString('utf8');
+  const text = isXmlType(contentType)
+    ? decodeXml(bytes, contentTypeHeader) : decodeDeclaredText(bytes, contentTypeHeader);
   if (isJsonType(contentType) && text.length > 0) {
     try {
       return JSON.stringify(JSON.parse(text), null, 2);
