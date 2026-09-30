@@ -53,6 +53,8 @@ export type ToolDef = {
   contentType?: string;
   /** True when the request body is a top-level array - exposed as one "body" arg. */
   requestBodyIsArray?: boolean;
+  /** A required JSON/multipart object body may validly be empty. */
+  requiredEmptyObject?: boolean;
   /** OpenAPI encoding rules keyed by form property name. */
   formEncoding?: Record<string, { style?: string; explode?: boolean; unsupported?: string }>;
   /**
@@ -864,6 +866,12 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     };
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
+    if (bodyRequired && (contentType === 'application/json' || contentType === 'multipart/form-data') &&
+      !args.some((arg) => arg.location === 'body' && arg.required)) {
+      const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const schema = resolveDocRef(requestBody?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
+      if (schema?.type === 'object' && !(Array.isArray(schema.required) && schema.required.length > 0)) tool.requiredEmptyObject = true;
+    }
     if (contentType === 'application/x-www-form-urlencoded') {
       const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const encodings = requestBody?.content?.[contentType]?.encoding;
