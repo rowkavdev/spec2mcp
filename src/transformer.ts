@@ -86,7 +86,11 @@ function generatedReadme(manifest: Manifest): string {
   lines.push('}');
   lines.push('```');
   lines.push('');
-  lines.push('Settings are saved in `spec2mcp.config.json`. The server reads the name, base URL and filters at startup. To add back operations excluded at generation, regenerate the project.');
+  if (manifest.auth.schemes.length > 0) {
+    lines.push('Settings are saved in `spec2mcp.config.json`. The server reads the name, base URL and filters at startup, and regenerating from this file keeps the same credential environment variable. To add back operations excluded at generation, regenerate the project.');
+  } else {
+    lines.push('Settings are saved in `spec2mcp.config.json`. The server reads the name, base URL and filters at startup. To add back operations excluded at generation, regenerate the project.');
+  }
   lines.push('');
   lines.push('## Tools');
   lines.push('');
@@ -138,7 +142,7 @@ export function createMcpTransformer(doc: OpenAPIV3.Document, opts: McpTransform
   return async (forge) => {
     const manifest = buildManifest(doc, opts);
     forge.emit('operations.json', JSON.stringify(manifest, null, 2) + '\n');
-    forge.emit(CONFIG_FILE, JSON.stringify(opts.projectConfig ?? { name: manifest.serverName, baseUrl: manifest.baseUrl, include: opts.include ?? [], exclude: opts.exclude ?? [] }, null, 2) + '\n');
+    forge.emit(CONFIG_FILE, JSON.stringify(opts.projectConfig ?? { name: manifest.serverName, baseUrl: manifest.baseUrl, ...(opts.envPrefix !== undefined ? { envPrefix: opts.envPrefix } : {}), include: opts.include ?? [], exclude: opts.exclude ?? [] }, null, 2) + '\n');
     forge.emit('server.mjs', opts.runtimeSource);
     forge.emit('package.json', generatedPackageJson(manifest));
     forge.emit('README.md', generatedReadme(manifest));

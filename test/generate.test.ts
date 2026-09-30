@@ -125,3 +125,26 @@ test('#188 symlinked output parent cannot hide a protected spec', async () => {
     await access(spec);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('#166 generated config persists a custom env prefix across regeneration', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-envprefix-'));
+  try {
+    const out = join(dir, 'demo-mcp');
+    await run(process.execPath, [TSX, CLI, 'generate', PETSTORE, '--out', out, '--name', 'demo', '--env-prefix', 'SECRET']);
+    const first = JSON.parse(await readFile(join(out, 'operations.json'), 'utf8'));
+    assert.equal(first.auth.schemes[0].envVar, 'SECRET_BEARER_AUTH');
+    const saved = JSON.parse(await readFile(join(out, 'spec2mcp.config.json'), 'utf8'));
+    assert.equal(saved.envPrefix, 'SECRET', 'the emitted config carries the effective prefix');
+    // Regenerate from the emitted config (copied outside the output directory,
+    // which the output-safety guard requires): the credential variable must not change.
+    const configCopy = join(dir, 'settings.json');
+    await (await import('node:fs/promises')).copyFile(join(out, 'spec2mcp.config.json'), configCopy);
+    await run(process.execPath, [TSX, CLI, 'generate', PETSTORE, '--config', configCopy, '--out', out]);
+    const second = JSON.parse(await readFile(join(out, 'operations.json'), 'utf8'));
+    assert.equal(second.auth.schemes[0].envVar, 'SECRET_BEARER_AUTH', 'regeneration keeps the same credential variable');
+    const resaved = JSON.parse(await readFile(join(out, 'spec2mcp.config.json'), 'utf8'));
+    assert.equal(resaved.envPrefix, 'SECRET', 'the round trip keeps the prefix in the emitted config');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
