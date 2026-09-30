@@ -405,3 +405,25 @@ test('#150 mixed-type oneOf query preserves both declared input branches', async
   assert.deepEqual(tool.args.find((a) => a.name === 'key')?.schema, { oneOf: [{ type: 'integer' }, { type: 'string' }] });
   assert.deepEqual((tool.inputSchema.properties as Record<string, unknown>).key, { oneOf: [{ type: 'integer' }, { type: 'string' }] });
 });
+
+test('#153 unsupported required body field uses a whole-body contract, not partial fields', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Coverage', version: '1' },
+    paths: { '/x': { post: { operationId: 'postX', requestBody: {
+      required: true, content: { 'application/json': { schema: { type: 'object',
+        required: ['matrix'], properties: { name: { type: 'string' }, matrix: { type: 'array', items: { type: 'array', items: { type: 'integer' } } } },
+      } } },
+    }, responses: { '204': { description: 'OK' } } } } },
+    components: { schemas: {} },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tool = buildManifest(doc as any).tools.find((t) => t.name === 'post_x');
+  assert.ok(tool);
+  assert.deepEqual(tool.args.map((a) => a.name), ['body']);
+  assert.deepEqual(tool.inputSchema.required, ['body']);
+  assert.deepEqual(tool.args[0]?.schema, { type: 'object', required: ['matrix'], properties: {
+    name: { type: 'string' }, matrix: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
+  } });
+});
