@@ -586,3 +586,29 @@ test('top-level referenced primitive body retains OpenAPI 3.1 ref sibling constr
   const schema = buildManifest(doc as any).tools.find((t) => t.name === 'post_score')?.args.find((a) => a.name === 'body')?.schema;
   assert.deepEqual(schema, { allOf: [{ type: 'integer', minimum: 0 }, { maximum: 10 }], description: 'Raw request body.' });
 });
+
+test('#138 an operation cookie parameter replaces the inherited path-item one', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Cookies', version: '1' },
+    components: { schemas: {} },
+    paths: {
+      '/account': {
+        parameters: [{ name: 'session', in: 'cookie', required: true, schema: { type: 'string' } }],
+        get: {
+          operationId: 'getAccount',
+          parameters: [{ name: 'session', in: 'cookie', required: false, schema: { type: 'integer' } }],
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+    },
+  } as never;
+  await init(doc);
+  const m = buildManifest(doc);
+  const tool = m.tools.find((t) => t.operationId === 'getAccount');
+  const sessionArgs = tool?.args.filter((a) => (a.apiName ?? a.name) === 'session') ?? [];
+  assert.equal(sessionArgs.length, 1, 'the operation parameter replaces the inherited one');
+  assert.equal(sessionArgs[0]?.name, 'session', 'no disambiguation suffix when the override wins');
+  assert.equal(sessionArgs[0]?.location, 'cookie');
+  assert.equal(sessionArgs[0]?.required, false, 'the overriding optional parameter drops the inherited requirement');
+  assert.equal(sessionArgs[0]?.schema.type, 'integer');
+});

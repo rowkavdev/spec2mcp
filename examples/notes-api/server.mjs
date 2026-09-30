@@ -433,6 +433,25 @@ async function executeTool(manifest, tool, args, validateOutput) {
       headers.set(arg.apiName ?? arg.name, parameterParts(arg, value).map((part) => Array.isArray(part) ? part.join('=') : part).join(','));
     }
 
+    // Cookie parameters serialize as `name=value` pairs joined by "; " in a
+    // single Cookie header (OpenAPI cookie style is form). An existing
+    // Cookie header (an explicit header argument) is kept and extended, not
+    // overwritten (#138).
+    const cookiePairs = [];
+    for (const arg of tool.args) {
+      const value = args[arg.name];
+      if (value === undefined || arg.location !== 'cookie') continue;
+      const wireName = arg.apiName ?? arg.name;
+      for (const part of parameterParts(arg, value)) {
+        if (Array.isArray(part)) cookiePairs.push(`${part[0]}=${encodeURIComponent(part[1])}`);
+        else cookiePairs.push(`${wireName}=${encodeURIComponent(part)}`);
+      }
+    }
+    if (cookiePairs.length > 0) {
+      const existing = headers.get('cookie');
+      headers.set('cookie', existing ? `${existing}; ${cookiePairs.join('; ')}` : cookiePairs.join('; '));
+    }
+
     applyAuth(manifest, tool, url, headers);
     // Append only after every searchParams mutation: URLSearchParams re-encodes
     // the entire query, erasing reserved expansion. API-key params keep priority.

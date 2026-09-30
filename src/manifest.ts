@@ -27,7 +27,7 @@ export type ToolArg = {
    * identical to `name`.
    */
   apiName?: string;
-  location: 'path' | 'query' | 'header' | 'body';
+  location: 'path' | 'query' | 'header' | 'cookie' | 'body';
   /** For body args: path of API field names for nested body reconstruction. */
   apiFieldPath?: string[];
   /** True for multipart/form-data fields carrying file content (format: binary). */
@@ -214,6 +214,48 @@ function restoreEnumTypes(values: string[], type: string): unknown[] {
     const n = Number(v);
     return v.trim() !== '' && Number.isFinite(n) ? n : v;
   });
+}
+
+/**
+ * Forge's resolver collects path, query and header parameters only, so a
+ * declared cookie parameter silently vanished from the generated tool
+ * (#138). Extract cookie parameters from the source document and build
+ * their schemas directly - the source enum keeps its primitive types, since
+ * these values never passed through the resolver's stringification (#130).
+ */
+function cookieParameters(doc: OpenAPIV3.Document, op: OperationInfo): OpenAPIV3.ParameterObject[] {
+  const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
+  // An operation parameter REPLACES a path-item parameter with the same
+  // name and location (OAS fixed fields); concatenating naively kept both,
+  // so an overriding operation cookie produced a duplicate, still-required
+  // inherited argument (review on #138).
+  const byName = new Map<string, OpenAPIV3.ParameterObject>();
+  for (const level of [doc.paths[op.path]?.parameters ?? [], operation?.parameters ?? []]) {
+    for (const raw of level) {
+      const param = resolveDocRef(raw) as OpenAPIV3.ParameterObject;
+      if (param?.in === 'cookie' && typeof param.name === 'string') byName.set(param.name, param);
+    }
+  }
+  return [...byName.values()];
+}
+
+function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unknown> {
+  const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
+  const schema: Record<string, unknown> = {};
+  const type = typeof resolved?.type === 'string' && JSON_TYPES.has(resolved.type) ? resolved.type : 'string';
+  schema.type = type;
+  if (type === 'array') {
+    const items = resolveDocRef(resolved?.items) as Record<string, unknown> | undefined;
+    const itemType = typeof items?.type === 'string' && JSON_TYPES.has(items.type) && items.type !== 'array' ? items.type : 'string';
+    const itemSchema: Record<string, unknown> = { type: itemType };
+    if (Array.isArray(items?.enum)) itemSchema.enum = items.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
+    schema.items = itemSchema;
+  }
+  if (Array.isArray(resolved?.enum)) schema.enum = resolved.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
+  if (resolved?.default !== undefined) schema.default = resolved.default;
+  const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
+  if (description) schema.description = description;
+  return resolved?.nullable === true ? { anyOf: [schema, { type: 'null' }] } : schema;
 }
 
 function argSchema(p: ParameterInfo): Record<string, unknown> {
@@ -713,6 +755,11 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     }
     for (const p of op.headerParams) {
       args.push({ name: p.name, location: 'header', required: p.required, schema: parameterArgSchema(doc, op, p, 'header'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+    }
+    for (const p of cookieParameters(doc, op)) {
+      // Cookie parameters always serialize with form style; record it
+      // explicitly so the runtime does not fall back to simple.
+      args.push({ name: p.name, location: 'cookie', required: p.required === true, schema: cookieArgSchema(p), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
