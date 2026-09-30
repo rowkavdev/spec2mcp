@@ -723,11 +723,10 @@ function decodeXml(bytes, contentTypeHeader) {
 /** Decode non-XML text. A declared charset is honored and decoded strictly:
  * an unsupported label or invalid bytes throw, which the caller surfaces as
  * an explicit tool error instead of silently replacing bytes (#131).
- * Undeclared text keeps UTF-8 rendering. */
+ * Undeclared text uses strict UTF-8, never silent byte replacement. */
 function decodeDeclaredText(bytes, contentTypeHeader) {
   const charset = declaredCharset(contentTypeHeader);
-  if (charset) return new TextDecoder(charset, { fatal: true }).decode(bytes);
-  return bytes.toString('utf8');
+  return new TextDecoder(charset ?? 'utf-8', { fatal: true }).decode(bytes);
 }
 
 /** Decode a text response body, pretty-printing JSON payloads. */
