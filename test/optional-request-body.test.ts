@@ -47,3 +47,33 @@ test('#144 required empty JSON and multipart objects retain a valid empty-body p
     assert.equal(tool.requiredEmptyObject === true, !tool.name.startsWith('optional'), tool.name);
   }
 });
+
+test('#144 required object where {} is invalid falls back to a required whole-body argument', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Empty Invalid', version: '1' }, components: { schemas: {} }, paths: {
+    '/min': { post: { operationId: 'minProps', requestBody: { required: true, content: { 'application/json': { schema:
+      { type: 'object', minProperties: 1, properties: { note: { type: 'string' } } } } } }, responses: { '204': { description: 'OK' } } } },
+    '/min-multipart': { post: { operationId: 'minPropsMultipart', requestBody: { required: true, content: { 'multipart/form-data': { schema:
+      { type: 'object', minProperties: 1, properties: { note: { type: 'string' } } } } } }, responses: { '204': { description: 'OK' } } } },
+    '/allo': { post: { operationId: 'allOfMin', requestBody: { required: true, content: { 'application/json': { schema:
+      { allOf: [{ type: 'object', properties: { note: { type: 'string' } } }, { type: 'object', minProperties: 1 }] } } } }, responses: { '204': { description: 'OK' } } } },
+  } } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const tools = buildManifest(doc).tools;
+  const min = tools.find((t) => t.name === 'min_props');
+  assert.ok(min);
+  assert.equal(min.requiredEmptyObject, undefined);
+  const bodyArgs = min.args.filter((a) => a.location === 'body');
+  assert.equal(bodyArgs.length, 1);
+  const whole = bodyArgs[0];
+  assert.ok(whole);
+  assert.equal(whole.required, true);
+  assert.equal((whole.apiFieldPath ?? []).length, 0);
+  assert.equal((whole.schema as Record<string, unknown>).minProperties, 1);
+  const multi = tools.find((t) => t.name === 'min_props_multipart');
+  assert.ok(multi);
+  assert.equal(multi.requiredEmptyObject, undefined);
+  assert.ok(!multi.args.some((a) => a.location === 'body' && a.required));
+  const composed = tools.find((t) => t.name === 'all_of_min');
+  assert.ok(composed);
+  assert.equal(composed.requiredEmptyObject, undefined);
+});

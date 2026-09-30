@@ -61,6 +61,7 @@ before(async () => {
       { ...tool('requiredEmptyJson', 'POST', [{ name: 'note', location: 'body', apiFieldPath: ['note'], required: false, schema: { type: 'string' } }], 'application/json'), requiredEmptyObject: true },
       { ...tool('requiredEmptyMultipart', 'POST', [{ name: 'note', location: 'body', apiFieldPath: [], required: false, schema: { type: 'string' } }], 'multipart/form-data'), requiredEmptyObject: true },
       tool('optionalMultipart', 'POST', [{ name: 'note', location: 'body', apiFieldPath: [], required: false, schema: { type: 'string' } }], 'multipart/form-data'),
+      tool('minPropsJson', 'POST', [{ name: 'body', location: 'body', apiFieldPath: [], required: true, schema: { type: 'object', minProperties: 1, properties: { note: { type: 'string' } } } }], 'application/json'),
       tool('emptyObject', 'POST', [bodyArg()], 'application/json'),
       tool('jsonString', 'POST', [bodyArg()], 'application/json'),
       tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
@@ -326,4 +327,15 @@ test('#144 required empty JSON and multipart bodies are transmitted, optional mu
   await call('optionalMultipart');
   assert.equal(seen.at(-1)!.body.length, 0);
   assert.equal(seen.at(-1)!.headers['content-type'], undefined);
+});
+
+
+test('#144 required body with minProperties rejects a missing body client-side and transmits a real one', async () => {
+  const before = seen.length;
+  const rejected = await rpc('tools/call', { name: 'minPropsJson', arguments: {} });
+  assert.ok(rejected.error !== undefined || rejected.result?.isError === true, 'call without the required body must be rejected');
+  assert.equal(seen.length, before, 'no upstream request for an invalid call');
+  await call('minPropsJson', { body: { note: 'hi' } });
+  assert.equal(seen.at(-1)!.body.toString('utf8'), '{"note":"hi"}');
+  assert.equal(seen.at(-1)!.headers['content-type'], 'application/json');
 });
