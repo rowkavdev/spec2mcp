@@ -507,7 +507,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
     return errorResult(`HTTP ${res.status} redirect not followed to protect request credentials and body.`);
   }
 
-  const contentType = baseContentType(res.headers.get('content-type'));
+  const contentTypeHeader = res.headers.get('content-type');
+  const contentType = baseContentType(contentTypeHeader);
   let bytes;
   try {
     bytes = Buffer.from(await res.arrayBuffer());
@@ -516,9 +517,12 @@ async function executeTool(manifest, tool, args, validateOutput) {
   }
 
   if (!res.ok) {
-    const detail = isTextLikeType(contentType)
-      ? truncateText(renderText(bytes, contentType))
-      : `[binary body: ${bytes.length} bytes of ${contentType || 'unknown type'}]`;
+    let detail;
+    try {
+      detail = isTextLikeType(contentType)
+        ? truncateText(renderText(bytes, contentType, contentTypeHeader))
+        : `[binary body: ${bytes.length} bytes of ${contentType || 'unknown type'}]`;
+    } catch { detail = `[undecodable body: ${bytes.length} bytes of ${contentType || 'unknown type'}]`; }
     return errorResult(`HTTP ${res.status} ${res.statusText}\n${detail}`.trim());
   }
 
@@ -554,7 +558,10 @@ async function executeTool(manifest, tool, args, validateOutput) {
       return errorResult(`HTTP ${res.status} ${res.statusText} declared JSON but the body is not valid JSON (invalid UTF-8 or JSON syntax).\n${preview}`.trim());
     }
   }
-  const result = textResult(truncateText(isJsonType(contentType) ? JSON.stringify(parsedJson, null, 2) : renderText(bytes, contentType)));
+  let rendered;
+  try { rendered = isJsonType(contentType) ? JSON.stringify(parsedJson, null, 2) : renderText(bytes, contentType, contentTypeHeader); }
+  catch { return errorResult(`HTTP ${res.status} ${res.statusText} declared XML but its text encoding could not be decoded.`); }
+  const result = textResult(truncateText(rendered));
   // Successful calls advertising outputSchema must have valid structuredContent.
   // A drifted, truncated or non-JSON upstream response stays visible as a tool
   // error, rather than violating the MCP client protocol with text-only success.
@@ -606,9 +613,28 @@ function withConfig(manifest, config) {
   };
 }
 
+/** Decode XML without replacement characters. HTTP charset takes precedence;
+ * otherwise use BOM, then the ASCII-compatible XML declaration. */
+function decodeXml(bytes, contentTypeHeader) {
+  const declaredCharset = /(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i.exec(contentTypeHeader ?? '');
+  let encoding = declaredCharset?.[1] ?? declaredCharset?.[2] ?? declaredCharset?.[3];
+  let offset = 0;
+  if (!encoding) {
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) { encoding = 'utf-8'; offset = 3; }
+    else if (bytes[0] === 0xff && bytes[1] === 0xfe) { encoding = 'utf-16le'; offset = 2; }
+    else if (bytes[0] === 0xfe && bytes[1] === 0xff) { encoding = 'utf-16be'; offset = 2; }
+    else {
+      const head = bytes.subarray(0, Math.min(bytes.length, 256)).toString('latin1');
+      encoding = /^<\?xml\s[^?]*?encoding\s*=\s*["']([^"']+)["']/i.exec(head)?.[1] ?? 'utf-8';
+    }
+  }
+  return new TextDecoder(encoding, { fatal: true }).decode(bytes.subarray(offset));
+}
+
 /** Decode a text response body, pretty-printing JSON payloads. */
-function renderText(bytes, contentType) {
-  const text = bytes.toString('utf8');
+function renderText(bytes, contentType, contentTypeHeader) {
+  const text = contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml')
+    ? decodeXml(bytes, contentTypeHeader) : bytes.toString('utf8');
   if (isJsonType(contentType) && text.length > 0) {
     try {
       return JSON.stringify(JSON.parse(text), null, 2);
