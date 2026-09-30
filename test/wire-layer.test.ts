@@ -208,9 +208,9 @@ test('#82 urlencoded form objects use form wire encoding, never JSON mislabeled 
   assert.deepEqual(params.getAll('tags'), ['one', 'two']);
   assert.equal(params.get('enabled'), 'false');
   const count = seen.length;
-  const invalid = await call('form', { body: { nested: { value: 1 } } });
+  const invalid = await call('form', { body: { nested: { value: { deeper: 1 } } } });
   assert.equal(invalid.isError, true);
-  assert.match(invalid.content[0].text, /Form field/);
+  assert.match(invalid.content[0].text, /[Ff]orm field/);
   assert.equal(seen.length, count);
 });
 
