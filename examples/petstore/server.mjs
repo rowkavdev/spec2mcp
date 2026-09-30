@@ -573,6 +573,11 @@ async function executeTool(manifest, tool, args, validateOutput) {
     }
   }
 
+  if (typeof body === 'string') {
+    try { body = encodeTextRequest(body, tool.contentType); }
+    catch (error) { return errorResult(error.message); }
+  }
+
   let res;
   try {
     res = await fetch(url, {
@@ -748,6 +753,24 @@ function decodeXml(bytes, contentTypeHeader) {
 function decodeDeclaredText(bytes, contentTypeHeader) {
   const charset = declaredCharset(contentTypeHeader);
   return new TextDecoder(charset ?? 'utf-8', { fatal: true }).decode(bytes);
+}
+
+/** Encode supported declared text charsets, never truncating unmappable text. */
+function encodeTextRequest(text, contentType) {
+  const charset = declaredCharset(contentType)?.trim().toLowerCase();
+  if (!charset || charset === 'utf-8' || charset === 'utf8') return text;
+  if (isJsonType(baseContentType(contentType))) throw new ToolArgumentError('JSON request bodies require UTF-8.');
+  if (charset === 'iso-8859-1' || charset === 'latin1' || charset === 'latin-1') {
+    if ([...text].some(char => char.codePointAt(0) > 255)) throw new ToolArgumentError('Request text cannot be encoded as ISO-8859-1.');
+    return Buffer.from(text, 'latin1');
+  }
+  if (charset === 'us-ascii' || charset === 'ascii') {
+    if ([...text].some(char => char.codePointAt(0) > 127)) throw new ToolArgumentError('Request text cannot be encoded as ASCII.');
+    return Buffer.from(text, 'ascii');
+  }
+  if (charset === 'utf-16le') return Buffer.from(text, 'utf16le');
+  if (charset === 'utf-16be') return Buffer.from(text, 'utf16le').swap16();
+  throw new ToolArgumentError(`Unsupported request charset "${charset}"; refusing to send mislabeled UTF-8.`);
 }
 
 /** Decode a text response body, pretty-printing JSON payloads. */
