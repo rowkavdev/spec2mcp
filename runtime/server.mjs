@@ -170,6 +170,19 @@ function formBody(value, encodings = {}) {
     if (!['form', 'spaceDelimited', 'pipeDelimited'].includes(style)) {
       throw new ToolArgumentError(`Unsupported form encoding style "${style}" for field "${key}".`);
     }
+    if (field !== null && typeof field === 'object' && !Array.isArray(field)) {
+      if (style !== 'form') throw new ToolArgumentError(`Object form field "${key}" requires form style.`);
+      const entries = Object.entries(field).filter(([, item]) => item !== undefined);
+      if (entries.some(([, item]) => item === null || typeof item === 'object')) {
+        throw new ToolArgumentError(`Object form field "${key}" must contain only scalar values.`);
+      }
+      if (explode) {
+        for (const [name, item] of entries) params.append(name, String(item));
+      } else {
+        params.append(key, entries.flatMap(([name, item]) => [name, String(item)]).join(','));
+      }
+      continue;
+    }
     const values = Array.isArray(field) ? field : [field];
     for (const item of values) {
       if (item === null || typeof item === 'object') {
