@@ -34,6 +34,8 @@ export type ToolArg = {
   binary?: boolean;
   /** Default file-part MIME type from multipart encoding.contentType. */
   defaultMimeType?: string;
+  /** Explicit media type of a non-file multipart part. */
+  partContentType?: string;
   /** OpenAPI parameter serialization (path/query/header). */
   style?: string;
   explode?: boolean;
@@ -1006,6 +1008,9 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
           arg.defaultMimeType = declaredMime.trim();
           const mimeSchema = (arg.schema.properties as Record<string, Record<string, unknown>>).mimeType;
           mimeSchema!.description = `File MIME type (default: ${arg.defaultMimeType}).`;
+        }
+        if (!arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
+          arg.partContentType = declaredMime.trim();
         }
         arg.required = bodyRequired && arg.required;
         args.push(arg);
