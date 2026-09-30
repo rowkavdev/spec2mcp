@@ -17,6 +17,7 @@ import { createMcpTransformer } from './transformer.js';
 import { watchSpec } from './watch.js';
 import type { ManifestOptions } from './manifest.js';
 import { readProjectConfig, resolveConfig, type ProjectConfig } from './config.js';
+import { assertOutputDoesNotContainInputs } from './output-safety.js';
 
 const VERSION = '0.1.0';
 
@@ -73,13 +74,16 @@ async function loadEffectiveSpec(spec: string, overlayPaths: string[]): Promise<
   return doc;
 }
 
-async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }, config: ProjectConfig): Promise<void> {
+async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }, config: ProjectConfig, configPath?: string): Promise<void> {
+  if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   const doc = await loadEffectiveSpec(spec, config.overlays ?? []);
   const forge = await init(doc);
   const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
+  await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
+  await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   await forge.finalize(outDir, files, { clean: true });
   const toolCount = JSON.parse(files.find((f) => f.path === 'operations.json')?.content ?? '{}').tools?.length ?? 0;
   console.log(`Generated ${toolCount} tools in ${outDir}`);
@@ -172,15 +176,16 @@ async function main(): Promise<void> {
   }
   if (values.watch && command === 'serve') fail('--watch is only supported by generate');
   if (values.watch) {
+    if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: values.config }]);
     const seconds = values['poll-interval'] === undefined ? 30 : Number(values['poll-interval']);
     if (!Number.isFinite(seconds) || seconds <= 0) fail('--poll-interval must be a positive number of seconds');
-    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config), { pollIntervalMs: seconds * 1000 });
+    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000 });
     process.once('SIGINT', () => { handle.close(); process.exit(0); });
     process.once('SIGTERM', () => { handle.close(); process.exit(0); });
   } else if (command === 'serve') {
     await cmdServe(spec, flags, config);
   } else {
-    await cmdGenerate(spec, flags, config);
+    await cmdGenerate(spec, flags, config, values.config);
   }
 }
 
