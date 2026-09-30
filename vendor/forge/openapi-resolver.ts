@@ -708,6 +708,8 @@ function extractMultipart(requestBody: RequestBody | undefined): MultipartInfo |
   for (const [propName, rawProp] of Object.entries(schema.properties)) {
     if (!rawProp) continue;
     const prop = resolveDocRef(rawProp);
+    // readOnly required applies to responses, never a multipart request.
+    if (prop.readOnly === true) continue;
     const isBinary = prop.format === 'binary';
 
     let type: MultipartField['type'] = 'string';
