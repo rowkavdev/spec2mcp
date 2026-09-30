@@ -274,14 +274,14 @@ function jsonLength(value: unknown, budget: SchemaBudget): number {
   return JSON.stringify(value)?.length ?? 0;
 }
 
-function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0, onUnresolved?: (ref: string) => void): unknown {
+function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0, onUnresolved?: (ref: string) => void, refSiblings = false): unknown {
   if (Array.isArray(node)) {
     charge(budget, 2); // brackets
     if (depth > MAX_SCHEMA_DEPTH) return [];
     const out: unknown[] = [];
     for (const value of node) {
       if (out.length) charge(budget, 1); // comma
-      out.push(dereferenceSchema(value, refChain, budget, depth + 1, onUnresolved));
+      out.push(dereferenceSchema(value, refChain, budget, depth + 1, onUnresolved, refSiblings));
     }
     return out;
   }
@@ -313,7 +313,15 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     }
     chain = new Set(refChain);
     chain.add(ref);
-    target = resolved;
+    if (refSiblings) {
+      const siblings = Object.fromEntries(Object.entries(target).filter(([key]) => key !== '$ref'));
+      if (Object.keys(siblings).length > 0) {
+        // JSON Schema 2020-12 applies $ref siblings as constraints, not overrides.
+        // Keep the intersection explicit: overlapping properties, enum, limits,
+        // and required arrays must all hold, not last-write-wins.
+        target = { allOf: [resolved, siblings] };
+      } else target = resolved;
+    } else target = resolved;
   }
 
   charge(budget, 2); // braces
@@ -325,7 +333,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     if (!Object.hasOwn(target, key) || key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') continue;
     charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
     first = false;
-    setOwn(out, key, dereferenceSchema(target[key], chain, budget, depth + 1, onUnresolved) as unknown);
+    setOwn(out, key, dereferenceSchema(target[key], chain, budget, depth + 1, onUnresolved, refSiblings) as unknown);
   }
   if (target.nullable === true && typeof out.type === 'string') {
     // Replace the already-counted scalar type with its union representation.
@@ -343,7 +351,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
 }
 
 /** Prefer specific 2xx codes, then the 2XX range, then default. */
-function successJsonSchema(op: OperationInfo, onUnresolved?: (ref: string) => void): Record<string, unknown> | undefined {
+function successJsonSchema(op: OperationInfo, doc: OpenAPIV3.Document, onUnresolved?: (ref: string) => void): Record<string, unknown> | undefined {
   const codes = Object.keys(op.responses ?? {})
     .filter((c) => /^2\d\d$/.test(c) || /^2XX$/i.test(c) || c === 'default')
     .sort((a, b) => {
@@ -384,11 +392,20 @@ function successJsonSchema(op: OperationInfo, onUnresolved?: (ref: string) => vo
     if (jsonMedia.length === 0) return undefined;
     if (jsonMedia.length !== mediaTypes.length) return undefined;
     for (const mediaType of jsonMedia) {
-      const schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
+      // Forge resolves top-level response $refs before exposing OperationInfo,
+      // which discards 3.1 sibling constraints. Read that schema from the
+      // loaded document only when it actually has siblings to preserve.
+      let schema = content[mediaType]?.schema as Record<string, unknown> | undefined;
+      if (doc.openapi.startsWith('3.1.')) {
+        const sourceResponses = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.responses;
+        const rawResponse = resolveDocRef(sourceResponses?.[code]) as OpenAPIV3.ResponseObject | undefined;
+        const loaded = rawResponse?.content?.[mediaType]?.schema as Record<string, unknown> | undefined;
+        if (loaded && '$ref' in loaded && Object.keys(loaded).length > 1) schema = loaded;
+      }
       if (!schema || typeof schema !== 'object' || Object.keys(schema).length === 0) return undefined;
       let dereferenced: Record<string, unknown>;
       try {
-        dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }, 0, trackUnresolved) as Record<string, unknown>;
+        dereferenced = dereferenceSchema(schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }, 0, trackUnresolved, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
       } catch (error) {
         if (error instanceof SchemaTooLarge) return undefined;
         throw error;
@@ -730,7 +747,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     }
 
 
-    const responseSchema = successJsonSchema(op, (ref) => {
+    const responseSchema = successJsonSchema(op, doc, (ref) => {
       warnings.push(`${toolName}: response schema $ref "${ref}" could not be resolved; the tool stays text-only (#112)`);
     });
     if (responseSchema) {
