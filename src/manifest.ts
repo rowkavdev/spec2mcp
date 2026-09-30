@@ -603,6 +603,26 @@ function multipartFieldArg(field: MultipartField): ToolArg {
   return { name: field.name, apiName: field.name, location: 'body', apiFieldPath: [], required: field.required, schema };
 }
 
+/** True only when an empty object provably satisfies an object schema: no
+ * required properties, no positive minProperties, and no composition keywords
+ * (anyOf/oneOf/not/if) whose verdict on {} needs full validation, anywhere in
+ * the allOf closure. Presence-triggered keywords (dependencies, propertyNames,
+ * additionalProperties) cannot fail on {} and are ignored. Unresolvable or
+ * cyclic references fail closed. */
+function emptyObjectSatisfies(schema: Record<string, unknown> | undefined, seen: Set<unknown> = new Set()): boolean {
+  if (!schema || typeof schema !== 'object' || seen.has(schema)) return false;
+  seen.add(schema);
+  if (Array.isArray(schema.required) && schema.required.length > 0) return false;
+  if (typeof schema.minProperties === 'number' && schema.minProperties > 0) return false;
+  if (schema.anyOf !== undefined || schema.oneOf !== undefined || schema.not !== undefined || schema.if !== undefined) return false;
+  if (Array.isArray(schema.allOf)) {
+    for (const branch of schema.allOf) {
+      if (!emptyObjectSatisfies(resolveDocRef(branch) as Record<string, unknown> | undefined, seen)) return false;
+    }
+  }
+  return true;
+}
+
 /** Content types declared on success (2xx or default) responses, in spec order. */
 function collectResponseContentTypes(op: OperationInfo): string[] {
   const seen = new Set<string>();
@@ -652,7 +672,19 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     // requestBody.required flag controls whether any body is needed at all.
     const bodyRequired = (resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined)?.required === true;
     const rootRequired = new Set(op.requestBodyRequired);
-    const wholeBodyRequired = contentType !== undefined && isJsonMediaType(contentType) && missingRequiredBodyField(doc, op, contentType);
+    // A required object body where {} is invalid for reasons the flattened
+    // arguments cannot express (minProperties, composition keywords) must not
+    // invent an empty body: fall back to a required whole-body argument whose
+    // dereferenced schema keeps the constraints. Root-level required
+    // properties are left to the flattening path, which already requires them.
+    const emptyBodyFallback = bodyRequired && contentType === 'application/json' && (() => {
+      const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const schema = resolveDocRef(body?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
+      if (schema?.type !== 'object') return false;
+      if (Array.isArray(schema.required) && schema.required.length > 0) return false;
+      return !emptyObjectSatisfies(schema);
+    })();
+    const wholeBodyRequired = contentType !== undefined && isJsonMediaType(contentType) && (missingRequiredBodyField(doc, op, contentType) || emptyBodyFallback);
     let wholeBodySchema: Record<string, unknown> | undefined;
     if (wholeBodyRequired) {
       const node = resolveDocRef((resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema);
@@ -870,7 +902,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       !args.some((arg) => arg.location === 'body' && arg.required)) {
       const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const schema = resolveDocRef(requestBody?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
-      if (schema?.type === 'object' && !(Array.isArray(schema.required) && schema.required.length > 0)) tool.requiredEmptyObject = true;
+      if (schema?.type === 'object' && emptyObjectSatisfies(schema)) tool.requiredEmptyObject = true;
     }
     if (contentType === 'application/x-www-form-urlencoded') {
       const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
