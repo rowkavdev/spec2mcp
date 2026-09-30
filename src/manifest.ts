@@ -9,6 +9,7 @@ import {
   getAllOperationIds,
   resolveOperation,
   resolveDocRef,
+  normalizedRequestBody,
   type MultipartField,
   type OperationInfo,
   type ParameterInfo,
@@ -379,7 +380,7 @@ function bodySchemaAtPath(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath:
 /** A required JSON property with no writable tool path must not disappear
  * behind a partially flattened body. Fall back to a validated whole body. */
 function missingRequiredBodyField(doc: OpenAPIV3.Document, op: OperationInfo, mediaType: string): boolean {
-  const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+  const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
   const root = resolveDocRef(body?.content?.[mediaType]?.schema) as Record<string, unknown> | undefined;
   if (!root || typeof root !== 'object') return false;
   const paths = op.bodyParams.map((p) => p.apiFieldPath);
@@ -875,7 +876,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
 
     // Schema.required applies only when a body is present. The OpenAPI
     // requestBody.required flag controls whether any body is needed at all.
-    const bodyRequired = (resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined)?.required === true;
+    const bodyRequired = (normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined)?.required === true;
     const rootRequired = new Set(op.requestBodyRequired);
     // A required object body where {} is invalid for reasons the flattened
     // arguments cannot express (minProperties, composition keywords) must not
@@ -883,7 +884,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     // dereferenced schema keeps the constraints. Root-level required
     // properties are left to the flattening path, which already requires them.
     const emptyBodyFallback = bodyRequired && contentType === 'application/json' && (() => {
-      const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const schema = resolveDocRef(body?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
       if (schema?.type !== 'object') return false;
       if (Array.isArray(schema.required) && schema.required.length > 0) return false;
@@ -892,7 +893,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const wholeBodyRequired = contentType !== undefined && isJsonMediaType(contentType) && (missingRequiredBodyField(doc, op, contentType) || emptyBodyFallback);
     let wholeBodySchema: Record<string, unknown> | undefined;
     if (wholeBodyRequired) {
-      const node = resolveDocRef((resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema);
+      const node = resolveDocRef((normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema);
       try {
         wholeBodySchema = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
       } catch (error) {
@@ -902,7 +903,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       }
     }
     if (contentType && isJsonMediaType(contentType) && contentType !== 'application/json') {
-      const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const schema = resolveDocRef(body?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
       const collect = (node: Record<string, unknown> | undefined): void => {
         if (!node) return;
@@ -914,7 +915,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     if (wholeBodyRequired) {
       args.push({ name: 'body', location: 'body', apiFieldPath: [], required: bodyRequired, schema: wholeBodySchema! });
     } else if (op.requestBodyIsArray) {
-      const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const raw = resolveDocRef(requestBody?.content?.[contentType ?? 'application/json']?.schema);
       let schema: Record<string, unknown>;
       try {
@@ -999,7 +1000,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         }
       }
     } else if (contentType === 'multipart/form-data' && op.multipart) {
-      const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const encodings = body?.content?.['multipart/form-data']?.encoding;
       for (const field of op.multipart.fields) {
         const arg = multipartFieldArg(field);
@@ -1020,7 +1021,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       // govern the tool argument. Non-JSON/free-form bodies retain the old view.
       let rawSchema: Record<string, unknown> | undefined;
       if (contentType && isJsonMediaType(contentType)) {
-        const body = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+        const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
         const node = body?.content?.[contentType]?.schema;
         if (node && typeof node === 'object') {
           let unresolved = false;
@@ -1125,12 +1126,12 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
     if (bodyRequired && (contentType === 'application/json' || contentType === 'multipart/form-data') &&
       !args.some((arg) => arg.location === 'body' && arg.required)) {
-      const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const schema = resolveDocRef(requestBody?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
       if (schema?.type === 'object' && emptyObjectSatisfies(schema)) tool.requiredEmptyObject = true;
     }
     if (contentType === 'application/x-www-form-urlencoded') {
-      const requestBody = resolveDocRef(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+      const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const encodings = requestBody?.content?.[contentType]?.encoding;
       if (encodings && Object.keys(encodings).length > 0) {
         tool.formEncoding = Object.fromEntries(Object.entries(encodings).map(([name, encoding]) => [name, {

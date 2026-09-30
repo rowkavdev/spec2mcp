@@ -631,6 +631,18 @@ export function resolveDocRef<T>(value: T): T {
   return resolveDocRef(cur as T);
 }
 
+/** Normalize media type/subtype case on a copy, never mutating the source spec. */
+export function normalizedRequestBody<T>(value: T): T {
+  const body = resolveDocRef(value) as T & { content?: Record<string, unknown> };
+  if (!body?.content) return body;
+  const content = Object.fromEntries(Object.entries(body.content).map(([media, data]) => {
+    const semicolon = media.indexOf(';');
+    const key = semicolon < 0 ? media.trim().toLowerCase() : media.slice(0, semicolon).trim().toLowerCase() + media.slice(semicolon);
+    return [key, data];
+  }));
+  return { ...body, content };
+}
+
 function isSemanticallyEmptyRequestBody(requestBody: RequestBody): boolean {
   const content = requestBody.content;
   if (!content) return false;
@@ -657,7 +669,7 @@ function isSemanticallyEmptyRequestBody(requestBody: RequestBody): boolean {
  */
 function extractRequestBodyDescription(requestBody: RequestBody | undefined): string | undefined {
   if (!requestBody) return undefined;
-  const body = resolveDocRef(requestBody);
+  const body = normalizedRequestBody(requestBody);
   if (typeof body.description === 'string' && body.description.length > 0) {
     return body.description;
   }
@@ -690,7 +702,7 @@ function extractRequestBodyDescription(requestBody: RequestBody | undefined): st
  */
 function extractMultipart(requestBody: RequestBody | undefined): MultipartInfo | undefined {
   if (!requestBody) return undefined;
-  const body = resolveDocRef(requestBody);
+  const body = normalizedRequestBody(requestBody);
   const multipartRaw = body.content?.['multipart/form-data']?.schema;
   const schema = resolveDocRef(multipartRaw);
   if (!schema || !schema.properties || typeof schema.properties !== 'object') {
@@ -748,7 +760,7 @@ function extractMultipart(requestBody: RequestBody | undefined): MultipartInfo |
  */
 function extractBodyMaxItems(requestBody: RequestBody | undefined): number | undefined {
   if (!requestBody) return undefined;
-  const body = resolveDocRef(requestBody);
+  const body = normalizedRequestBody(requestBody);
   const schema = resolveDocRef(body.content?.['application/json']?.schema);
   if (!schema) return undefined;
   if (schema.type !== 'array') return undefined;
@@ -768,7 +780,7 @@ function extractArrayBodyInfo(requestBody: RequestBody | undefined): {
   itemRef: string | null;
 } {
   if (!requestBody) return { isArray: false, itemRef: null };
-  const body = resolveDocRef(requestBody);
+  const body = normalizedRequestBody(requestBody);
   const schema = resolveDocRef(body.content?.['application/json']?.schema);
   if (!schema || schema.type !== 'array') return { isArray: false, itemRef: null };
   const itemRef = schema.items ? extractRef(schema.items) : null;
@@ -791,7 +803,7 @@ function extractArrayBodyInfo(requestBody: RequestBody | undefined): {
  */
 function extractRequestBodyRequired(requestBody: RequestBody | undefined): string[] {
   if (!requestBody) return [];
-  const body = resolveDocRef(requestBody);
+  const body = normalizedRequestBody(requestBody);
   const schema = resolveDocRef(body.content?.['application/json']?.schema);
   if (!schema || schema.type === 'array') return [];
   const required = new Set<string>();
@@ -826,7 +838,7 @@ function extractRequestBodyRequired(requestBody: RequestBody | undefined): strin
  */
 function extractBodyDiscriminator(requestBody: RequestBody | undefined): BodyDiscriminator | undefined {
   if (!requestBody) return undefined;
-  const body = resolveDocRef(requestBody);
+  const body = normalizedRequestBody(requestBody);
   const jsonSchema = resolveDocRef(body.content?.['application/json']?.schema);
   if (!jsonSchema?.oneOf) return undefined;
   const discriminator = jsonSchema.discriminator;
@@ -1617,7 +1629,7 @@ export function populateOperationMap(value: unknown): void {
       // Resolve `#/components/requestBodies/...` once before deriving body
       // metadata. Several consumers need content types and schemas, not the
       // reference shell itself.
-      const resolvedRequestBody = operation.requestBody ? resolveDocRef(operation.requestBody) : undefined;
+      const resolvedRequestBody = operation.requestBody ? normalizedRequestBody(operation.requestBody) : undefined;
       const requestBody =
         resolvedRequestBody && !isSemanticallyEmptyRequestBody(resolvedRequestBody) ? resolvedRequestBody : undefined;
       const requestBodyDescription = extractRequestBodyDescription(requestBody);
