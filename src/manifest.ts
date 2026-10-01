@@ -294,6 +294,8 @@ function cookieParameters(doc: OpenAPIV3.Document, op: OperationInfo): OpenAPIV3
 
 function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
   const items = resolveDocRef(raw) as Record<string, unknown> | undefined;
+  const composition = primitiveComposition(items);
+  if (composition) return applySourceConstraints(composition, items);
   const type = typeof items?.type === 'string' && JSON_TYPES.has(items.type) && items.type !== 'array' ? items.type : 'string';
   const schema: Record<string, unknown> = { type };
   if (Array.isArray(items?.enum)) schema.enum = items.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
