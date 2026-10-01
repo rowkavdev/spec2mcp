@@ -218,7 +218,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
   const composition = primitiveComposition(resolved);
-  if (composition && new Set(((Object.values(composition)[0] as Record<string, unknown>[]).map((branch) => branch.type))).size > 1) {
+  if (composition) {
     // Constraints sibling to the composition (const, pattern, ranges) apply
     // to every branch and must survive the mapping (review on #151).
     return applySourceConstraints({ ...composition, ...(p.description ? { description: p.description } : {}) }, resolved);
