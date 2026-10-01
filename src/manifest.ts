@@ -584,6 +584,56 @@ function stripWriteOnlyRequired(node: unknown): void {
   }
 }
 
+/** Literal JSON values are data, even when they contain schema keyword names. */
+const SCHEMA_LITERAL_KEYS = new Set(['const', 'enum', 'default', 'example', 'examples']);
+
+function copySchemaLiteral(node: unknown, budget: SchemaBudget, depth = 0): unknown {
+  if (!node || typeof node !== 'object') {
+    charge(budget, jsonLength(node, budget));
+    return node;
+  }
+  // Never replace a deep literal with {} or []: that would change its value.
+  if (depth > MAX_SCHEMA_DEPTH) throw new SchemaTooLarge();
+  charge(budget, 2);
+  if (Array.isArray(node)) {
+    const out: unknown[] = [];
+    for (const value of node) {
+      if (out.length) charge(budget, 1);
+      out.push(copySchemaLiteral(value, budget, depth + 1));
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  let first = true;
+  for (const key in node) {
+    if (!Object.hasOwn(node, key)) continue;
+    charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
+    first = false;
+    setOwn(out, key, copySchemaLiteral((node as Record<string, unknown>)[key], budget, depth + 1));
+  }
+  return out;
+}
+
+function dereferenceSchemaMap(node: unknown, chain: Set<string>, budget: SchemaBudget, depth: number, onUnresolved?: (ref: string) => void, refSiblings = false): unknown {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+  charge(budget, 2);
+  const out: Record<string, unknown> = {};
+  let first = true;
+  for (const key in node) {
+    if (!Object.hasOwn(node, key)) continue;
+    charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
+    first = false;
+    setOwn(out, key, dereferenceSchema((node as Record<string, unknown>)[key], chain, budget, depth + 1, onUnresolved, refSiblings));
+  }
+  return out;
+}
+
+function dereferenceSchemaValue(key: string, value: unknown, chain: Set<string>, budget: SchemaBudget, depth: number, onUnresolved?: (ref: string) => void, refSiblings = false): unknown {
+  if (SCHEMA_LITERAL_KEYS.has(key)) return copySchemaLiteral(value, budget);
+  if (SCHEMA_MAP_KEYS.has(key)) return dereferenceSchemaMap(value, chain, budget, depth, onUnresolved, refSiblings);
+  return dereferenceSchema(value, chain, budget, depth, onUnresolved, refSiblings);
+}
+
 function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0, onUnresolved?: (ref: string) => void, refSiblings = false): unknown {
   if (Array.isArray(node)) {
     charge(budget, 2); // brackets
@@ -643,7 +693,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     if (!Object.hasOwn(target, key) || key === '$ref' || key === 'xml' || key === 'discriminator' || key === 'externalDocs' || key === 'nullable') continue;
     charge(budget, (first ? 0 : 1) + jsonLength(key, budget) + 1);
     first = false;
-    setOwn(out, key, dereferenceSchema(target[key], chain, budget, depth + 1, onUnresolved, refSiblings) as unknown);
+    setOwn(out, key, dereferenceSchemaValue(key, target[key], chain, budget, depth + 1, onUnresolved, refSiblings));
   }
   if (target.nullable === true && typeof out.type === 'string') {
     // Replace the already-counted scalar type with its union representation.
