@@ -44,6 +44,7 @@ before(async () => {
   await init(doc);
   const baseUrl = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
   const manifest = buildManifest(doc, { baseUrl });
+  manifest.tools.push({ ...manifest.tools[0]!, name: 'bad_schema', args: [], inputSchema: { type: 'object', properties: { value: { type: 'string', pattern: '[' } } } });
   await mkdir(OUT, { recursive: true });
   await writeFile(`${OUT}/operations.json`, JSON.stringify(manifest));
   await copyFile(RUNTIME, `${OUT}/server.mjs`);
@@ -73,4 +74,12 @@ test('invalid JSON query content is rejected before upstream HTTP', async () => 
   const result = await rpc('tools/call', { name: 'get_items', arguments: { filter: { id: 1 } } });
   assert.notEqual(result.result.isError, true, JSON.stringify(result));
   assert.equal(seen.length, 1);
+});
+
+test('uncompilable input schema fails closed without breaking the healthy tool', async () => {
+  const before = seen.length;
+  const result = await rpc('tools/call', { name: 'bad_schema', arguments: { value: 'text' } });
+  assert.equal(result.result?.isError, true, JSON.stringify(result));
+  assert.match(result.result.content[0].text, /schema could not be compiled/);
+  assert.equal(seen.length, before);
 });
