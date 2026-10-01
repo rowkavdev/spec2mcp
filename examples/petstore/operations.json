@@ -188,7 +188,7 @@
           "location": "path",
           "required": true,
           "schema": {
-            "type": "string",
+            "type": "integer",
             "description": "ID of the pet"
           }
         }
@@ -198,7 +198,7 @@
         "type": "object",
         "properties": {
           "petId": {
-            "type": "string",
+            "type": "integer",
             "description": "ID of the pet"
           }
         },
@@ -243,7 +243,7 @@
           "location": "path",
           "required": true,
           "schema": {
-            "type": "string",
+            "type": "integer",
             "description": "ID of the pet"
           }
         }
@@ -253,7 +253,7 @@
         "type": "object",
         "properties": {
           "petId": {
-            "type": "string",
+            "type": "integer",
             "description": "ID of the pet"
           }
         },

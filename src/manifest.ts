@@ -244,7 +244,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
  */
 function restoreIntegerType(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): Record<string, unknown> {
   if (!source || typeof source !== 'object') return schema;
-  if (source.type === 'integer' && schema.type === 'number') schema.type = 'integer';
+  if (['integer', 'number', 'boolean'].includes(String(source.type)) && ['string', 'number'].includes(String(schema.type))) schema.type = source.type;
   const items = schema.items as Record<string, unknown> | undefined;
   const sourceItems = resolveDocRef(source.items) as Record<string, unknown> | undefined;
   if (items && items.type === 'number' && sourceItems?.type === 'integer') items.type = 'integer';
