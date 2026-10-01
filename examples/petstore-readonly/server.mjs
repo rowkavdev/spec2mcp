@@ -289,10 +289,13 @@ function applyAuth(manifest, tool, url, headers) {
 function parameterStyle(arg) {
   return arg.style ?? (arg.location === 'query' ? 'form' : 'simple');
 }
-function arrayParameterParts(style, explode, value) {
+function arrayParameterParts(arg, style, explode, value) {
   const items = value.filter((item) => item !== null).map(String);
   // Nothing but nulls leaves nothing to send, not an empty "name=".
   if (items.length === 0) return [];
+  // deepObject has no array form in OpenAPI; APIs that declare it for arrays
+  // (Stripe's expand) read the bracket form name[]=a&name[]=b.
+  if (style === 'deepObject' && arg.location === 'query') return items.map((item) => ['', item]);
   if (style === 'spaceDelimited') return [items.join(' ')];
   if (style === 'pipeDelimited') return [items.join('|')];
   if (style === 'form' && explode) return items;
@@ -310,7 +313,7 @@ function objectParameterParts(arg, style, explode, value) {
 function parameterParts(arg, value) {
   const style = parameterStyle(arg);
   const explode = arg.explode ?? (style === 'form');
-  if (Array.isArray(value)) return arrayParameterParts(style, explode, value);
+  if (Array.isArray(value)) return arrayParameterParts(arg, style, explode, value);
   if (value !== null && typeof value === 'object') return objectParameterParts(arg, style, explode, value);
   return [String(value)];
 }
