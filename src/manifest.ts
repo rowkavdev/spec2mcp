@@ -209,14 +209,14 @@ function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: strin
     .find(param => param?.in === location && param.name === name);
 }
 
-function boundedParameterSchema(source: unknown, label: string, warnings: string[]): Record<string, unknown> {
+function boundedParameterSchema(source: unknown, label: string, warnings: string[], jsonContent = false): Record<string, unknown> {
   try {
     return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
   } catch (error) {
     if (!(error instanceof SchemaTooLarge)) throw error;
     warnings.push(`${label} schema exceeds the input budget; using its root type without nested constraints`);
     const root = resolveDocRef(source) as Record<string, unknown> | undefined;
-    return typeof root?.type === 'string' && JSON_TYPES.has(root.type) ? { type: root.type } : {};
+    return typeof root?.type === 'string' && JSON_TYPES.has(root.type) ? { type: jsonContent && root.nullable === true ? [root.type, 'null'] : root.type } : {};
   }
 }
 
@@ -224,7 +224,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
   if ((location === 'query' || location === 'header') && media.length === 1) {
-    return boundedParameterSchema(media[0]![1].schema, `${location} parameter "${p.name}"`, warnings);
+    return boundedParameterSchema(media[0]![1].schema, `${location} parameter "${p.name}"`, warnings, isJsonMediaType(media[0]![0]));
   }
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
@@ -316,7 +316,7 @@ function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
 function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[]): Record<string, unknown> {
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
-    return boundedParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings);
+    return boundedParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, isJsonMediaType(media[0]![0]));
   }
   return formCookieArgSchema(param, warnings);
 }
