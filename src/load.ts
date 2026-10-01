@@ -366,6 +366,14 @@ function isJsonSchemaTypeArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every((t) => typeof t === 'string' && JSON_SCHEMA_TYPES.has(t));
 }
 
+function collapseSchemaChildren(key: string, value: unknown): void {
+  if (['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'].includes(key) && value && typeof value === 'object') {
+    for (const schema of Object.values(value)) collapseTypeArrays(schema);
+  } else {
+    collapseTypeArrays(value);
+  }
+}
+
 function preserveAnyOfIntersection(schema: Record<string, unknown>): void {
   if (!Array.isArray(schema.anyOf)) return;
   const existing = Array.isArray(schema.allOf) ? schema.allOf : [];
@@ -382,7 +390,7 @@ function preserveAnyOfIntersection(schema: Record<string, unknown>): void {
  * and the manifest's schema pipeline turns it back into the standard union
  * form for advertised input/output schemas. Dropping it silently made the
  * runtime reject valid null responses and null request fields.
- * `example`/`examples` subtrees hold payload data, not schemas - a property
+ * `example`/`examples`/`const`/`enum`/`default` hold payload data, not schemas - a property
  * named "type" there is user data and is left alone.
  */
 function collapseTypeArrays(node: unknown): void {
@@ -406,8 +414,8 @@ function collapseTypeArrays(node: unknown): void {
     }
   }
   for (const [key, value] of Object.entries(rec)) {
-    if (key === 'example' || key === 'examples') continue;
-    collapseTypeArrays(value);
+    if (['example', 'examples', 'const', 'enum', 'default'].includes(key)) continue;
+    collapseSchemaChildren(key, value);
   }
 }
 
