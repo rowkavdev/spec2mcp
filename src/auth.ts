@@ -85,13 +85,17 @@ export function buildAuthPlan(doc: OpenAPIV3.Document, envPrefix: string): {
   for (const [name, def] of Object.entries(definitions)) {
     if (!def) continue;
     // A scheme may be a $ref alias to another scheme (#135). Follow internal
-    // references - with a hop limit against alias cycles - keeping the alias
+    // references - tracking visited refs against alias cycles - keeping the alias
     // as the scheme name so the operation and its env var use the name the
     // spec's security requirements reference. An unresolvable alias stays
     // unmapped, and forOperation's missing-scheme warning names it.
     let resolved: unknown = def;
-    for (let hop = 0; hop < 5 && resolved && typeof resolved === 'object' && '$ref' in resolved; hop++) {
-      resolved = resolveSecuritySchemeRef(doc, (resolved as { $ref: string }).$ref);
+    const visited = new Set<string>();
+    while (resolved && typeof resolved === 'object' && '$ref' in resolved) {
+      const ref = (resolved as { $ref: string }).$ref;
+      if (visited.has(ref)) break;
+      visited.add(ref);
+      resolved = resolveSecuritySchemeRef(doc, ref);
     }
     if (resolved && typeof resolved === 'object' && !('$ref' in resolved)) {
       const scheme = mapScheme(name, resolved as OpenAPIV3.SecuritySchemeObject, envPrefix);
