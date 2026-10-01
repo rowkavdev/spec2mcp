@@ -484,8 +484,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
       if (value === undefined || arg.location !== 'cookie') continue;
       const wireName = arg.apiName ?? arg.name;
       for (const part of parameterParts(arg, value)) {
-        if (Array.isArray(part)) cookiePairs.push(`${part[0]}=${encodeURIComponent(part[1])}`);
-        else cookiePairs.push(`${wireName}=${encodeURIComponent(part)}`);
+        if (Array.isArray(part)) cookiePairs.push(`${encodeURIComponent(part[0])}=${encodeURIComponent(part[1])}`);
+        else cookiePairs.push(`${encodeURIComponent(wireName)}=${encodeURIComponent(part)}`);
       }
     }
     if (cookiePairs.length > 0) {

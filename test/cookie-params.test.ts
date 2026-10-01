@@ -64,6 +64,7 @@ before(async () => {
       operationId: 'getProfile',
       parameters: [
         { name: 'session', in: 'cookie', required: true, schema: { type: 'string' } },
+        { name: 'extra', in: 'cookie', style: 'form', explode: true, schema: { type: 'object', additionalProperties: { type: 'string' } } },
         { name: 'prefs', in: 'cookie', schema: { type: 'array', items: { type: 'integer', enum: [1, 2] } } },
         { name: 'tier', in: 'cookie', schema: { type: 'integer', enum: [1, 2], default: 1, description: 'Account tier' } },
       ],
@@ -131,4 +132,10 @@ test('#138 the Cookie header carries the serialized cookie parameters', async ()
 test('#138 a required cookie parameter is enforced', async () => {
   const res = await callTool('get_profile', {});
   assert.match(res.content?.[0]?.text ?? '', /Missing required argument.*session/);
+});
+
+test('exploded cookie object keys cannot create a second cookie', async () => {
+  const res = await callTool('get_profile', { session: 'safe', extra: { 'foo=bar; admin': 'true' } });
+  assert.ok(!res.isError, String(res.content?.[0]?.text ?? ''));
+  assert.equal(seenCookies.at(-1), 'session=safe; foo%3Dbar%3B%20admin=true');
 });
