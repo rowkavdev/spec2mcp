@@ -13,3 +13,23 @@ async function firstTool(doc: unknown) {
 }
 
 // Each test below builds a manifest from a small spec and checks the tool arguments.
+
+test('an operation parameter overrides a path-level parameter with the same name and location', async () => {
+  const tool = await firstTool({
+    openapi: '3.0.3', info: { title: 'Override', version: '1' }, components: { schemas: {} },
+    paths: { '/a/{id}': {
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'q', in: 'query', schema: { type: 'string' } },
+      ],
+      get: { operationId: 'getA', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'integer' } }], responses: { '200': { description: 'OK' } } },
+    } },
+  });
+  const q = tool.args.filter((arg) => arg.name === 'q');
+  assert.equal(q.length, 1);
+  const [only] = q;
+  assert.ok(only);
+  assert.deepEqual(only.schema, { type: 'integer' });
+  assert.equal(only.required, true);
+  assert.ok(tool.args.some((arg) => arg.name === 'id' && arg.location === 'path'));
+});
