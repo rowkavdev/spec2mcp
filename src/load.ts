@@ -366,6 +366,12 @@ function isJsonSchemaTypeArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every((t) => typeof t === 'string' && JSON_SCHEMA_TYPES.has(t));
 }
 
+function preserveAnyOfIntersection(schema: Record<string, unknown>): void {
+  if (!Array.isArray(schema.anyOf)) return;
+  const existing = Array.isArray(schema.allOf) ? schema.allOf : [];
+  schema.allOf = [...existing, { anyOf: schema.anyOf }];
+}
+
 /**
  * Collapse JSON Schema 2020-12 type unions so Forge can type the schema:
  * `["string", "null"]` becomes `type: "string"` (a nullable parameter simply
@@ -393,6 +399,7 @@ function collapseTypeArrays(node: unknown): void {
       rec.type = nonNull[0];
       if (nullable) rec.nullable = true;
     } else if (nonNull.length > 1) {
+      preserveAnyOfIntersection(rec);
       rec.anyOf = nonNull.map((t) => ({ type: t }));
       delete rec.type;
       if (nullable) rec.nullable = true;
