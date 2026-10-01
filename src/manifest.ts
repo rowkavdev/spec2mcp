@@ -209,11 +209,22 @@ function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: strin
     .find(param => param?.in === location && param.name === name);
 }
 
-function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
+function boundedParameterSchema(source: unknown, label: string, warnings: string[]): Record<string, unknown> {
+  try {
+    return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge)) throw error;
+    warnings.push(`${label} schema exceeds the input budget; using its root type without nested constraints`);
+    const root = resolveDocRef(source) as Record<string, unknown> | undefined;
+    return typeof root?.type === 'string' && JSON_TYPES.has(root.type) ? { type: root.type } : {};
+  }
+}
+
+function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
   if ((location === 'query' || location === 'header') && media.length === 1) {
-    return dereferenceSchema(media[0]![1].schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
+    return boundedParameterSchema(media[0]![1].schema, `${location} parameter "${p.name}"`, warnings);
   }
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
@@ -302,15 +313,15 @@ function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
   return schema;
 }
 
-function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unknown> {
+function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[]): Record<string, unknown> {
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
-    return dereferenceSchema(media[0]![1].schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
+    return boundedParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings);
   }
-  return formCookieArgSchema(param);
+  return formCookieArgSchema(param, warnings);
 }
 
-function formCookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unknown> {
+function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[]): Record<string, unknown> {
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
   const composition = primitiveComposition(resolved);
   if (composition) return applySourceConstraints({
@@ -322,7 +333,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, u
   const schema: Record<string, unknown> = {};
   const type = typeof resolved?.type === 'string' && JSON_TYPES.has(resolved.type) ? resolved.type : 'string';
   if (type === 'object') {
-    const object = dereferenceSchema(resolved, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+    const object = boundedParameterSchema(resolved, `cookie parameter "${param.name}"`, warnings);
     return { ...object, ...(param.description ? { description: param.description } : {}) };
   }
   schema.type = type;
@@ -920,7 +931,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const args: ToolArg[] = [];
     const nullableParents: { arg: ToolArg; node: Record<string, unknown> }[] = [];
     for (const p of op.pathParams) {
-      args.push({ name: p.name, location: 'path', required: true, schema: parameterArgSchema(doc, op, p, 'path'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      args.push({ name: p.name, location: 'path', required: true, schema: parameterArgSchema(doc, op, p, 'path', warnings), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     // A path placeholder with no declared parameter would otherwise stay
     // literal in the URL and hit the upstream as "{id}" (#152). Synthesize
@@ -944,17 +955,17 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     }
     for (const p of op.queryParams) {
       const media = Object.keys(sourceParameter(doc, op, p.name, 'query')?.content ?? {});
-      args.push({ name: p.name, location: 'query', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'query'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      args.push({ name: p.name, location: 'query', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'query', warnings), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.headerParams) {
       const media = Object.keys(sourceParameter(doc, op, p.name, 'header')?.content ?? {});
-      args.push({ name: p.name, location: 'header', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'header'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      args.push({ name: p.name, location: 'header', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'header', warnings), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of cookieParameters(doc, op)) {
       // Cookie parameters always serialize with form style; record it
       // explicitly so the runtime does not fall back to simple.
       const media = Object.keys(p.content ?? {});
-      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p, warnings), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
