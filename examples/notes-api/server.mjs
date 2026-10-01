@@ -294,7 +294,7 @@ function parameterParts(arg, value) {
   const explode = arg.explode ?? (style === 'form');
   const scalar = (item) => String(item);
   if (Array.isArray(value)) {
-    const items = value.map(scalar);
+    const items = value.filter((item) => item !== null).map(scalar);
     if (style === 'spaceDelimited') return [items.join(' ')];
     if (style === 'pipeDelimited') return [items.join('|')];
     if (style === 'form' && explode) return items;
@@ -485,6 +485,9 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
           url.searchParams.append(wireName, JSON.stringify(value));
           continue;
         }
+        // A null has no wire form for a plain parameter, so it is left off
+        // instead of being sent as the text "null".
+        if (value === null) continue;
         const style = parameterStyle(arg);
         const parts = parameterParts(arg, value);
         for (const part of parts) {
@@ -507,6 +510,7 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
         headers.set(arg.apiName ?? arg.name, JSON.stringify(value));
         continue;
       }
+      if (value === null) continue;
       headers.set(arg.apiName ?? arg.name, parameterParts(arg, value).map((part) => Array.isArray(part) ? part.join('=') : part).join(','));
     }
 
@@ -524,6 +528,7 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
         cookiePairs.push(`${encodeURIComponent(wireName)}=${encodeURIComponent(JSON.stringify(value))}`);
         continue;
       }
+      if (value === null) continue;
       for (const part of parameterParts(arg, value)) {
         if (Array.isArray(part)) cookiePairs.push(`${encodeURIComponent(part[0])}=${encodeURIComponent(part[1])}`);
         else cookiePairs.push(`${encodeURIComponent(wireName)}=${encodeURIComponent(part)}`);
