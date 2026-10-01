@@ -75,12 +75,19 @@ async function loadEffectiveSpec(spec: string, overlayPaths: string[]): Promise<
   return doc;
 }
 
+function warnIfFiltersRemovedEverything(manifest: { tools: unknown[] }, flags: ManifestOptions): void {
+  if (manifest.tools.length === 0 && ((flags.include?.length ?? 0) > 0 || (flags.exclude?.length ?? 0) > 0)) {
+    console.error('warning: --include/--exclude left no operations, so the server has no tools. Check the selectors.');
+  }
+}
+
 async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }, config: ProjectConfig, configPath?: string): Promise<void> {
   if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   const doc = await loadEffectiveSpec(spec, config.overlays ?? []);
   const forge = await init(doc);
   const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
+  warnIfFiltersRemovedEverything(probe, flags);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
   await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
   const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, ...(config.envPrefix !== undefined ? { envPrefix: config.envPrefix } : {}), include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
@@ -112,6 +119,7 @@ async function cmdServe(spec: string, flags: ManifestOptions & { name?: string; 
   const manifest = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of manifest.auth.warnings) console.error(`warning: ${warning}`);
   for (const warning of manifest.warnings ?? []) console.error(`warning: ${warning}`);
+  warnIfFiltersRemovedEverything(manifest, flags);
   const runtimeUrl = new URL('../runtime/server.mjs', import.meta.url).href;
   const runtime = (await import(runtimeUrl)) as {
     runServer: (manifest: import('./manifest.js').Manifest) => Promise<void>;
