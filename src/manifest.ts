@@ -292,6 +292,14 @@ function cookieParameters(doc: OpenAPIV3.Document, op: OperationInfo): OpenAPIV3
   return [...byName.values()];
 }
 
+function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
+  const items = resolveDocRef(raw) as Record<string, unknown> | undefined;
+  const type = typeof items?.type === 'string' && JSON_TYPES.has(items.type) && items.type !== 'array' ? items.type : 'string';
+  const schema: Record<string, unknown> = { type };
+  if (Array.isArray(items?.enum)) schema.enum = items.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
+  return schema;
+}
+
 function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unknown> {
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
@@ -300,14 +308,12 @@ function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unkno
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
   const schema: Record<string, unknown> = {};
   const type = typeof resolved?.type === 'string' && JSON_TYPES.has(resolved.type) ? resolved.type : 'string';
-  schema.type = type;
-  if (type === 'array') {
-    const items = resolveDocRef(resolved?.items) as Record<string, unknown> | undefined;
-    const itemType = typeof items?.type === 'string' && JSON_TYPES.has(items.type) && items.type !== 'array' ? items.type : 'string';
-    const itemSchema: Record<string, unknown> = { type: itemType };
-    if (Array.isArray(items?.enum)) itemSchema.enum = items.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
-    schema.items = itemSchema;
+  if (type === 'object') {
+    const object = dereferenceSchema(resolved, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+    return { ...object, ...(param.description ? { description: param.description } : {}) };
   }
+  schema.type = type;
+  if (type === 'array') schema.items = cookieArrayItemSchema(resolved?.items);
   if (Array.isArray(resolved?.enum)) schema.enum = resolved.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
   if (resolved?.default !== undefined) schema.default = resolved.default;
   const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
