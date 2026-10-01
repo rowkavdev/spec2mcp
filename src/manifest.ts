@@ -307,7 +307,18 @@ function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unkno
   if (media.length === 1) {
     return dereferenceSchema(media[0]![1].schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
   }
+  return formCookieArgSchema(param);
+}
+
+function formCookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unknown> {
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
+  const composition = primitiveComposition(resolved);
+  if (composition) return applySourceConstraints({
+    ...composition,
+    ...(Array.isArray(resolved?.enum) ? { enum: resolved.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v)) } : {}),
+    ...(resolved?.default !== undefined ? { default: resolved.default } : {}),
+    ...(param.description ? { description: param.description } : {}),
+  }, resolved);
   const schema: Record<string, unknown> = {};
   const type = typeof resolved?.type === 'string' && JSON_TYPES.has(resolved.type) ? resolved.type : 'string';
   if (type === 'object') {
