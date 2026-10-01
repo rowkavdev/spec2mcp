@@ -164,3 +164,21 @@ test('#151 outer constraints survive on composition branches and array-items com
   assert.ok(!validate({ vals: ['safe', 'other'] }), 'an item outside the items const fails');
   assert.ok(!validate({ vals: ['safe'] }), 'the outer minItems survives the composition path');
 });
+
+test('same-type primitive parameter branches retain their alternative constraints', async () => {
+  const doc = {
+    openapi: '3.1.0', info: { title: 'Choices', version: '1' },
+    components: { schemas: {} },
+    paths: { '/choices': { get: { operationId: 'choices', parameters: [
+      { name: 'choice', in: 'query', schema: { oneOf: [
+        { type: 'string', const: 'first' }, { type: 'string', const: 'second' },
+      ] } },
+    ], responses: { '200': { description: 'OK' } } } }, },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.inputSchema;
+  const validate = compileOutputValidator(schema);
+  assert.ok(validate({ choice: 'first' }));
+  assert.ok(validate({ choice: 'second' }));
+  assert.ok(!validate({ choice: 'other' }), 'undeclared alternative must fail');
+});
