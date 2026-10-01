@@ -58,15 +58,22 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   // Bundle external $refs (files/URLs) into one document. Internal refs are
   // left as refs - Forge's resolver handles those. Bundle from the original
   // path/URL (not the parsed object) so relative external refs like
-  // "../policies.yaml" resolve against the spec's own location. For URLs this
-  // fetches the document a second time - acceptable for a generator. A
+  // "../policies.yaml" resolve against the spec's own location. A
   // converted Swagger 2.0 document only exists in memory, so it bundles from
   // the object instead; refs relative to the spec's own location are
   // unsupported for 2.0 inputs (none of the major 2.0 publishers - Slack,
   // Kubernetes - use them).
-  const doc = (await $RefParser.bundle((convertedFromSwagger2 ? raw : input) as never, {
-    dereference: { circular: 'ignore' },
-  })) as unknown as OpenAPIV3.Document;
+  // A URL input is bundled from the document already fetched, with the URL
+  // kept as the base for relative refs. Handing the bare URL to the parser
+  // would make it fetch the root again through its safe-URL resolver, which
+  // rejects loopback and private hosts and broke local dev specs (#168).
+  const isUrl = /^https?:\/\//i.test(input);
+  const bundleOptions = { dereference: { circular: 'ignore' } } as never;
+  const doc = (await (convertedFromSwagger2
+    ? $RefParser.bundle(raw as never, bundleOptions)
+    : isUrl
+      ? $RefParser.bundle(input as never, raw as never, bundleOptions)
+      : $RefParser.bundle(input as never, bundleOptions))) as unknown as OpenAPIV3.Document;
 
   // Forge's operation indexer requires paths and components.schemas to exist;
   // real-world specs often omit components, and a webhook-only 3.1 spec may
