@@ -293,6 +293,10 @@ function cookieParameters(doc: OpenAPIV3.Document, op: OperationInfo): OpenAPIV3
 }
 
 function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unknown> {
+  const media = Object.entries(param.content ?? {});
+  if (media.length === 1) {
+    return dereferenceSchema(media[0]![1].schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
+  }
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
   const schema: Record<string, unknown> = {};
   const type = typeof resolved?.type === 'string' && JSON_TYPES.has(resolved.type) ? resolved.type : 'string';
@@ -889,7 +893,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     for (const p of cookieParameters(doc, op)) {
       // Cookie parameters always serialize with form style; record it
       // explicitly so the runtime does not fall back to simple.
-      args.push({ name: p.name, location: 'cookie', required: p.required === true, schema: cookieArgSchema(p), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      const media = Object.keys(p.content ?? {});
+      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
