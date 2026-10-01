@@ -515,6 +515,11 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
       const value = args[arg.name];
       if (value === undefined || arg.location !== 'cookie') continue;
       const wireName = arg.apiName ?? arg.name;
+      if (arg.parameterContentType) {
+        if (!isJsonType(baseContentType(arg.parameterContentType))) return errorResult(`Unsupported cookie content media type "${arg.parameterContentType}".`);
+        cookiePairs.push(`${encodeURIComponent(wireName)}=${encodeURIComponent(JSON.stringify(value))}`);
+        continue;
+      }
       for (const part of parameterParts(arg, value)) {
         if (Array.isArray(part)) cookiePairs.push(`${encodeURIComponent(part[0])}=${encodeURIComponent(part[1])}`);
         else cookiePairs.push(`${encodeURIComponent(wireName)}=${encodeURIComponent(part)}`);
