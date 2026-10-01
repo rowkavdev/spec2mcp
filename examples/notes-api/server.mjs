@@ -23,6 +23,7 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 const REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_CHARS = 50_000;
 const DEFAULT_MAX_BINARY_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
 function envLimit(name, fallback) {
   const raw = process.env[name];
@@ -35,6 +36,32 @@ function envLimit(name, fallback) {
 const MAX_RESPONSE_CHARS = envLimit('SPEC2MCP_MAX_RESPONSE_CHARS', DEFAULT_MAX_RESPONSE_CHARS);
 /** Binary payloads larger than this are summarised instead of returned (SPEC2MCP_MAX_BINARY_BYTES). */
 const MAX_BINARY_BYTES = envLimit('SPEC2MCP_MAX_BINARY_BYTES', DEFAULT_MAX_BINARY_BYTES);
+/** Bound downloaded bytes before text/JSON decoding or binary summarisation. */
+const MAX_RESPONSE_BYTES = envLimit('SPEC2MCP_MAX_RESPONSE_BYTES', DEFAULT_MAX_RESPONSE_BYTES);
+
+class ResponseBodyLimitError extends Error {}
+
+async function readBoundedBody(response) {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new ResponseBodyLimitError(`Response body exceeds the ${MAX_RESPONSE_BYTES} byte limit. Set SPEC2MCP_MAX_RESPONSE_BYTES to raise it.`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, length);
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 /** Raised when a tool argument cannot be encoded into the request body. */
 class ToolArgumentError extends Error {}
@@ -612,8 +639,9 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
   const contentType = baseContentType(contentTypeHeader);
   let bytes;
   try {
-    bytes = Buffer.from(await res.arrayBuffer());
+    bytes = await readBoundedBody(res);
   } catch (err) {
+    if (err instanceof ResponseBodyLimitError) return errorResult(err.message);
     return errorResult(`Failed to read the response body: ${err instanceof Error ? err.message : String(err)}`);
   }
 

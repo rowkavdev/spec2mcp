@@ -103,3 +103,7 @@ npm test
 `src/` holds the generator, `runtime/server.mjs` is copied into generated projects, `test/` covers manifests and MCP sessions, and `vendor/forge/` contains the pinned Forge source. [Full guide](docs/guide.md) · [Forge pin](vendor/forge/PINNED.md).
 
 MIT licensed. Vendored Forge code is Apache-2.0, copyright Cloudflare, Inc.; see `vendor/forge/LICENSE`.
+
+### Response download limit
+
+Generated runtimes stop reading an API response after 16 MiB by default, before JSON parsing, text decoding or binary conversion. Oversized responses return a tool error rather than partial success. Set `SPEC2MCP_MAX_RESPONSE_BYTES` to a positive byte count in the generated server's environment to raise or lower this bound. The limit counts streamed bytes, including chunked responses, and does not trust the upstream Content-Length header. Existing text-display and binary-return limits still apply after downloading.
