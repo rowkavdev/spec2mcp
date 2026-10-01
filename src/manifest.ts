@@ -413,12 +413,38 @@ function bodySchemaAtPath(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath:
   return schema;
 }
 
+function pinBodyDiscriminator(source: unknown, schema: Record<string, unknown>): Record<string, unknown> {
+  const root = source as Record<string, unknown> | undefined;
+  const discriminator = root?.discriminator as { propertyName?: string; mapping?: Record<string, string> } | undefined;
+  const property = discriminator?.propertyName;
+  if (!property || !Array.isArray(root?.oneOf) || !Array.isArray(schema.oneOf)) return schema;
+  const branches = schema.oneOf as Record<string, unknown>[];
+  schema.oneOf = root.oneOf.map((raw, index) => {
+    const ref = (raw as { $ref?: string }).$ref;
+    if (!ref) return branches[index];
+    const implicit = ref.split('/').at(-1)!.replaceAll('~1', '/').replaceAll('~0', '~');
+    const values = Object.entries(discriminator.mapping ?? {}).filter(([, target]) => target === ref || target === implicit).map(([value]) => value);
+    if (values.length === 0) values.push(implicit);
+    const branch = branches[index]!;
+    const properties = { ...(branch.properties as Record<string, unknown> | undefined) };
+    const constraint = { enum: values };
+    setOwn(properties, property, properties[property] ? { allOf: [properties[property], constraint] } : constraint);
+    return { ...branch, properties, required: [...new Set([...(Array.isArray(branch.required) ? branch.required : []), property])] };
+  });
+  return schema;
+}
+
+function hasBodyAlternatives(schema: Record<string, unknown>): boolean {
+  return Array.isArray(schema.oneOf);
+}
+
 /** A required JSON property with no writable tool path must not disappear
  * behind a partially flattened body. Fall back to a validated whole body. */
 function missingRequiredBodyField(doc: OpenAPIV3.Document, op: OperationInfo, mediaType: string): boolean {
   const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
   const root = resolveDocRef(body?.content?.[mediaType]?.schema) as Record<string, unknown> | undefined;
   if (!root || typeof root !== 'object') return false;
+  if (hasBodyAlternatives(root)) return true;
   const paths = op.bodyParams.map((p) => p.apiFieldPath);
   const seen = new Set<unknown>();
   const walk = (node: Record<string, unknown>, prefix: string[]): boolean => {
@@ -954,7 +980,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     if (wholeBodyRequired) {
       const node = resolveDocRef((normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema);
       try {
-        wholeBodySchema = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+        wholeBodySchema = pinBodyDiscriminator(node, dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>);
       } catch (error) {
         if (!(error instanceof SchemaTooLarge)) throw error;
         warnings.push(`${toolName}: required body properties cannot be flattened and the whole-body schema exceeds the input budget; using an unconstrained body argument`);
