@@ -394,7 +394,7 @@ function hasUnsafeIntegerToken(json) {
   });
 }
 
-async function executeTool(manifest, tool, args, validateOutput) {
+async function executeTool(manifest, tool, args, validateOutput, validateInput) {
   // Only body parent/leaf paths can cover each other. Query/header/path
   // args with the same visible prefix are separate wire parameters (#123).
   const supplied = tool.args.filter((arg) => args[arg.name] !== undefined);
@@ -588,6 +588,8 @@ async function executeTool(manifest, tool, args, validateOutput) {
     catch (error) { return errorResult(error.message); }
   }
 
+  if (!validateInput) return errorResult('Tool input schema could not be compiled; call rejected.');
+  if (!validateInput(args)) return errorResult('Tool arguments do not match the declared input schema.');
   let res;
   try {
     res = await fetch(url, {
@@ -807,6 +809,14 @@ function createMcpServer(manifest) {
   // Compile outputSchema validators once at server start: the manifest's
   // schemas are already dereferenced and size-capped at generation time.
   // Reusing compiled SDK/Ajv validators keeps call-time work payload-bound.
+  const inputValidators = new Map();
+  for (const tool of manifest.tools) {
+    try {
+      inputValidators.set(tool.name, compileOutputValidator(tool.inputSchema));
+    } catch (err) {
+      console.error(`${manifest.serverName}: ${tool.name}: inputSchema failed to compile; calls to this tool will be rejected`);
+    }
+  }
   const outputValidators = new Map();
   for (const tool of manifest.tools) {
     if (!tool.outputSchema) continue;
@@ -836,7 +846,9 @@ function createMcpServer(manifest) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) return errorResult(`Unknown tool: ${request.params.name}`);
-    return executeTool(manifest, tool, request.params.arguments ?? {}, outputValidators.get(request.params.name));
+    const args = request.params.arguments ?? {};
+    const validateInput = inputValidators.get(tool.name);
+    return executeTool(manifest, tool, args, outputValidators.get(request.params.name), validateInput);
   });
 
   return server;
