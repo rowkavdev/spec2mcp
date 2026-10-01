@@ -53,9 +53,9 @@ test('3.1 type unions collapse to Forge-readable types', async () => {
   assert.equal(m.specVersion, '3.1.0');
   const getPet = m.tools.find((t) => t.name === 'get_pet');
   assert.ok(getPet);
-  // Path params are typed as strings by Forge (they serialise into the URL).
+  // Keep the declared path input type; stringify only at the wire boundary.
   const petId = getPet.args.find((a) => a.name === 'petId');
-  assert.equal(petId?.schema.type, 'string');
+  assert.equal(petId?.schema.type, 'integer');
   // ["integer", "null"] on a query param collapses to a plain integer argument.
   const verbose = getPet.args.find((a) => a.name === 'verbose');
   // Forge's metadata collapses the union to number; the manifest restores

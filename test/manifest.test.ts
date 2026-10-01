@@ -36,7 +36,7 @@ test('args carry location, required-ness and JSON schemas', async () => {
   const petId = getPet.args.find((a) => a.name === 'petId');
   assert.equal(petId?.location, 'path');
   assert.equal(petId?.required, true);
-  assert.equal(petId?.schema.type, 'string', 'Forge types path params as strings (they serialise into the URL)');
+  assert.equal(petId?.schema.type, 'integer', 'Path input keeps its declared type; serialization happens at the wire boundary');
   assert.deepEqual(getPet.inputSchema.required, ['petId']);
 
   const listPets = m.tools.find((t) => t.name === 'list_pets');
