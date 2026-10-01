@@ -243,7 +243,27 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
       return applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
     }
   }
-  return applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
+  const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
+  // A path value is always present, so only query and header values may be null.
+  return location === 'path' ? base : restoreNullable(base, resolved);
+}
+
+/**
+ * OpenAPI 3.0 `nullable: true` is gone from Forge's parameter metadata, so a
+ * nullable query or header value was rejected before serialization. Restore
+ * it as a type union on the scalar and on array items, like cookies and
+ * request bodies already do. Non-nullable schemas are untouched.
+ */
+function restoreNullable(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!source || typeof source !== 'object') return schema;
+  const widen = (node: Record<string, unknown>) => {
+    if (typeof node.type === 'string' && node.type !== 'null') node.type = [node.type, 'null'];
+  };
+  if (source.nullable === true) widen(schema);
+  const items = schema.items as Record<string, unknown> | undefined;
+  const sourceItems = resolveDocRef(source.items) as Record<string, unknown> | undefined;
+  if (items && typeof items === 'object' && sourceItems?.nullable === true) widen(items);
+  return schema;
 }
 
 /**
