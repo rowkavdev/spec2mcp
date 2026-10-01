@@ -308,6 +308,7 @@ function cookieArgSchema(param: OpenAPIV3.ParameterObject): Record<string, unkno
   if (resolved?.default !== undefined) schema.default = resolved.default;
   const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
   if (description) schema.description = description;
+  applySourceConstraints(schema, resolved);
   return resolved?.nullable === true ? { anyOf: [schema, { type: 'null' }] } : schema;
 }
 
