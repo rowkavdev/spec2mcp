@@ -44,7 +44,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
       // Servers come from host/basePath/schemes and securityDefinitions
       // become components.securitySchemes, so auth and base URL handling
       // are unchanged.
-      const bundled2 = await $RefParser.bundle(input as never, {
+      const bundled2 = await $RefParser.bundle(input, raw as never, {
         dereference: { circular: 'ignore' },
       });
       const { openapi } = await convertSwagger2(bundled2 as never, { patch: true, warnOnly: true } as never);
