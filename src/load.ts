@@ -8,7 +8,7 @@ import { parse as parseYaml } from 'yaml';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import { convert as convertSwagger2 } from 'swagger2openapi';
 import type { OpenAPIV3 } from 'openapi-types';
-import { basename } from 'node:path';
+import { basename, resolve as resolvePath } from 'node:path';
 import type { ApiOverlay, ApiOverlayFile } from '../vendor/forge/index.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
@@ -463,4 +463,15 @@ function synthesizeId(method: string, path: string): string {
     .replace(/_{2,}/g, '_')
     .toLowerCase();
   return slug.length > 0 ? `${method}_${slug}` : `${method}_root`;
+}
+
+/**
+ * Local files a spec pulls in through external $refs (excluding the root
+ * itself), so `--watch` can regenerate when one of them changes (#156).
+ */
+export async function localRefDependencies(input: string): Promise<string[]> {
+  if (/^https?:\/\//i.test(input)) return [];
+  const refs = await $RefParser.resolve(input) as unknown as { paths(...types: string[]): string[] };
+  const root = resolvePath(input);
+  return refs.paths('file').map((file: string) => resolvePath(file)).filter((file: string) => file !== root);
 }
