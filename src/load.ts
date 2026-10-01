@@ -13,6 +13,42 @@ import type { ApiOverlay, ApiOverlayFile } from '../vendor/forge/index.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 
+/**
+ * Arguments for the external-ref bundle. A URL input is already fetched and
+ * parsed, so hand the parser the parsed root with the URL as its base: it
+ * resolves relative refs against that URL without fetching the root again
+ * (the second fetch went through the parser's safe-URL check and rejected a
+ * spec served from loopback, #168). When the user pointed at a loopback or
+ * private host, refs may only follow to that same origin; the parser's
+ * protection stays on for every other root.
+ */
+function bundleArgs(input: string, raw: unknown, converted: boolean): unknown[] {
+  const options: Record<string, unknown> = { dereference: { circular: 'ignore' } };
+  if (converted) return [raw, options];
+  if (!/^https?:\/\//i.test(input)) return [input, options];
+  const root = new URL(input);
+  if (isLocalHost(root.hostname)) {
+    options.resolve = {
+      http: {
+        safeUrlResolver: false,
+        canRead: (file: { url: string }) => {
+          try { return new URL(file.url).origin === root.origin; } catch { return false; }
+        },
+      },
+    };
+  }
+  return [input, raw, options];
+}
+
+function isLocalHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1') return true;
+  const m = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (!m) return false;
+  const a = Number(m[1]), b = Number(m[2]);
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   let text: string;
   if (/^https?:\/\//i.test(input)) {
@@ -58,15 +94,13 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   // Bundle external $refs (files/URLs) into one document. Internal refs are
   // left as refs - Forge's resolver handles those. Bundle from the original
   // path/URL (not the parsed object) so relative external refs like
-  // "../policies.yaml" resolve against the spec's own location. For URLs this
-  // fetches the document a second time - acceptable for a generator. A
+  // "../policies.yaml" resolve against the spec's own location. For URLs the
+  // already-parsed root is reused with the URL as its base. A
   // converted Swagger 2.0 document only exists in memory, so it bundles from
   // the object instead; refs relative to the spec's own location are
   // unsupported for 2.0 inputs (none of the major 2.0 publishers - Slack,
   // Kubernetes - use them).
-  const doc = (await $RefParser.bundle((convertedFromSwagger2 ? raw : input) as never, {
-    dereference: { circular: 'ignore' },
-  })) as unknown as OpenAPIV3.Document;
+  const doc = (await $RefParser.bundle(...bundleArgs(input, raw, convertedFromSwagger2) as [never, never, never])) as unknown as OpenAPIV3.Document;
 
   // Forge's operation indexer requires paths and components.schemas to exist;
   // real-world specs often omit components, and a webhook-only 3.1 spec may
