@@ -33,7 +33,6 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
     throw new Error('Input is not an OpenAPI or Swagger document (expected a JSON or YAML object).');
   }
 
-  let convertedFromSwagger2 = false;
   if (!('openapi' in raw)) {
     if ((raw as Record<string, unknown>).swagger === '2.0') {
       // Swagger 2.0: bundle external $refs from the original path/URL
@@ -44,27 +43,21 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
       // Servers come from host/basePath/schemes and securityDefinitions
       // become components.securitySchemes, so auth and base URL handling
       // are unchanged.
-      const bundled2 = await $RefParser.bundle(input as never, {
+      const bundled2 = await $RefParser.bundle(input, raw as never, {
         dereference: { circular: 'ignore' },
       });
       const { openapi } = await convertSwagger2(bundled2 as never, { patch: true, warnOnly: true } as never);
       raw = openapi;
-      convertedFromSwagger2 = true;
     } else {
       throw new Error('Input does not look like an OpenAPI 3.x or Swagger 2.0 document (missing top-level "openapi"/"swagger").');
     }
   }
 
-  // Bundle external $refs (files/URLs) into one document. Internal refs are
-  // left as refs - Forge's resolver handles those. Bundle from the original
-  // path/URL (not the parsed object) so relative external refs like
-  // "../policies.yaml" resolve against the spec's own location. For URLs this
-  // fetches the document a second time - acceptable for a generator. A
-  // converted Swagger 2.0 document only exists in memory, so it bundles from
-  // the object instead; refs relative to the spec's own location are
-  // unsupported for 2.0 inputs (none of the major 2.0 publishers - Slack,
-  // Kubernetes - use them).
-  const doc = (await $RefParser.bundle((convertedFromSwagger2 ? raw : input) as never, {
+  // The parsed root has already been read. Keep its path/URL as the base
+  // for relative refs without fetching it again (including local URLs).
+  // External refs still use the parser's default safe-URL resolver; root
+  // selection does not grant access to arbitrary private ref targets.
+  const doc = (await $RefParser.bundle(input, raw as never, {
     dereference: { circular: 'ignore' },
   })) as unknown as OpenAPIV3.Document;
 
