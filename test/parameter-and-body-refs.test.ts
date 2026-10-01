@@ -46,3 +46,17 @@ test('a $ref to components.parameters keeps its schema constraints and optionali
   assert.equal(limit.required, false);
   assert.deepEqual(limit.schema, { type: 'integer', maximum: 5 });
 });
+
+test('a $ref to components.requestBodies exposes its fields as body arguments', async () => {
+  const tool = await firstTool({
+    openapi: '3.0.3', info: { title: 'BodyRef', version: '1' },
+    components: { schemas: {}, requestBodies: { Item: { required: true, content: { 'application/json': { schema: {
+      type: 'object', properties: { name: { type: 'string' }, count: { type: 'integer' } }, required: ['name'],
+    } } } } } },
+    paths: { '/items': { post: { operationId: 'createItem', requestBody: { $ref: '#/components/requestBodies/Item' }, responses: { '201': { description: 'Created' } } } } },
+  });
+  const body = tool.args.filter((arg) => arg.location === 'body');
+  assert.deepEqual(body.map((arg) => arg.name).sort(), ['count', 'name']);
+  assert.equal(body.find((arg) => arg.name === 'name')?.required, true);
+  assert.equal(body.find((arg) => arg.name === 'count')?.required, false);
+});
