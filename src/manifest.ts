@@ -758,7 +758,20 @@ function schemaIsObject(schema: Record<string, unknown>): boolean {
  * filename and MIME type; the runtime turns it into a FormData file part.
  * Scalar fields are appended as form fields, object/array fields as JSON.
  */
-function multipartFieldArg(field: MultipartField): ToolArg {
+function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, warnings: string[]): Record<string, unknown> | undefined {
+  const root = resolveDocRef(body?.content?.['multipart/form-data']?.schema) as Record<string, unknown> | undefined;
+  const source = mergedProperties(root)[field.name];
+  if (source === undefined) return undefined;
+  try {
+    return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge)) throw error;
+    warnings.push(`multipart field "${field.name}" schema exceeds the input budget; using its adapted schema`);
+    return undefined;
+  }
+}
+
+function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, warnings: string[]): ToolArg {
   if (field.isBinary) {
     const arg: ToolArg = {
       name: field.name,
@@ -785,6 +798,8 @@ function multipartFieldArg(field: MultipartField): ToolArg {
     }
     return arg;
   }
+  const source = multipartSourceSchema(field, body, warnings);
+  if (source) return { name: field.name, apiName: field.name, location: 'body', apiFieldPath: [], required: field.required, schema: source };
   const schema: Record<string, unknown> = { description: field.description };
   if (field.type === 'object') {
     schema.type = 'object';
@@ -1036,7 +1051,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const encodings = body?.content?.['multipart/form-data']?.encoding;
       for (const field of op.multipart.fields) {
-        const arg = multipartFieldArg(field);
+        const arg = multipartFieldArg(field, body, warnings);
         const declaredMime = encodings?.[field.name]?.contentType;
         if (arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
           arg.defaultMimeType = declaredMime.trim();
