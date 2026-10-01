@@ -390,7 +390,11 @@ function isAudioType(contentType) {
 
 function truncateText(text) {
   if (text.length <= MAX_RESPONSE_CHARS) return text;
-  return `${text.slice(0, MAX_RESPONSE_CHARS)}\n\n[truncated: the response is ${text.length} characters; showing the first ${MAX_RESPONSE_CHARS}. Set SPEC2MCP_MAX_RESPONSE_CHARS to raise the limit.]`;
+  let end = MAX_RESPONSE_CHARS;
+  const previous = text.charCodeAt(end - 1);
+  const next = text.charCodeAt(end);
+  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+  return `${text.slice(0, end)}\n\n[truncated: the response is ${text.length} characters; showing the first ${end}. Set SPEC2MCP_MAX_RESPONSE_CHARS to raise the limit.]`;
 }
 
 /** Replace the response body when it is too large to ship back as base64. */
