@@ -33,3 +33,16 @@ test('an operation parameter overrides a path-level parameter with the same name
   assert.equal(only.required, true);
   assert.ok(tool.args.some((arg) => arg.name === 'id' && arg.location === 'path'));
 });
+
+test('a $ref to components.parameters keeps its schema constraints and optionality', async () => {
+  const tool = await firstTool({
+    openapi: '3.0.3', info: { title: 'ParamRef', version: '1' },
+    components: { schemas: {}, parameters: { Limit: { name: 'limit', in: 'query', schema: { type: 'integer', maximum: 5 } } } },
+    paths: { '/items': { get: { operationId: 'listItems', parameters: [{ $ref: '#/components/parameters/Limit' }], responses: { '200': { description: 'OK' } } } } },
+  });
+  const limit = tool.args.find((arg) => arg.name === 'limit');
+  assert.ok(limit);
+  assert.equal(limit.location, 'query');
+  assert.equal(limit.required, false);
+  assert.deepEqual(limit.schema, { type: 'integer', maximum: 5 });
+});
