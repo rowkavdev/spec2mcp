@@ -43,7 +43,7 @@ export type ToolArg = {
   style?: string;
   explode?: boolean;
   allowReserved?: boolean;
-  /** Query content media serialization instead of style/explode. */
+  /** Parameter content media serialization instead of style/explode. */
   parameterContentType?: string;
   required: boolean;
   schema: Record<string, unknown>;
@@ -212,7 +212,7 @@ function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: strin
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header'): Record<string, unknown> {
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
-  if (location === 'query' && media.length === 1) {
+  if ((location === 'query' || location === 'header') && media.length === 1) {
     return dereferenceSchema(media[0]![1].schema, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
   }
   const source = candidate?.schema as Record<string, unknown> | undefined;
@@ -883,7 +883,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       args.push({ name: p.name, location: 'query', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'query'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of op.headerParams) {
-      args.push({ name: p.name, location: 'header', required: p.required, schema: parameterArgSchema(doc, op, p, 'header'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      const media = Object.keys(sourceParameter(doc, op, p.name, 'header')?.content ?? {});
+      args.push({ name: p.name, location: 'header', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required, schema: parameterArgSchema(doc, op, p, 'header'), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     for (const p of cookieParameters(doc, op)) {
       // Cookie parameters always serialize with form style; record it

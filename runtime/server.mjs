@@ -471,6 +471,11 @@ async function executeTool(manifest, tool, args, validateOutput) {
     for (const arg of tool.args) {
       const value = args[arg.name];
       if (value === undefined || arg.location !== 'header') continue;
+      if (arg.parameterContentType) {
+        if (!isJsonType(baseContentType(arg.parameterContentType))) return errorResult(`Unsupported header content media type "${arg.parameterContentType}".`);
+        headers.set(arg.apiName ?? arg.name, JSON.stringify(value));
+        continue;
+      }
       headers.set(arg.apiName ?? arg.name, parameterParts(arg, value).map((part) => Array.isArray(part) ? part.join('=') : part).join(','));
     }
 
