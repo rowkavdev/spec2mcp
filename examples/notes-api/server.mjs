@@ -295,13 +295,16 @@ function parameterParts(arg, value) {
   const scalar = (item) => String(item);
   if (Array.isArray(value)) {
     const items = value.filter((item) => item !== null).map(scalar);
+    // Nothing but nulls leaves nothing to send, not an empty "name=".
+    if (items.length === 0) return [];
     if (style === 'spaceDelimited') return [items.join(' ')];
     if (style === 'pipeDelimited') return [items.join('|')];
     if (style === 'form' && explode) return items;
     return [items.join(',')];
   }
   if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value);
+    const entries = Object.entries(value).filter(([, v]) => v !== null);
+    if (entries.length === 0) return [];
     if (style === 'deepObject' && arg.location === 'query') return entries.map(([k, v]) => [k, scalar(v)]);
     if (style === 'form' && explode) return entries.map(([k, v]) => [k, scalar(v)]);
     if (style === 'simple' && explode) return [entries.map(([k, v]) => `${k}=${scalar(v)}`).join(',')];
@@ -511,7 +514,9 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
         continue;
       }
       if (value === null) continue;
-      headers.set(arg.apiName ?? arg.name, parameterParts(arg, value).map((part) => Array.isArray(part) ? part.join('=') : part).join(','));
+      const parts = parameterParts(arg, value);
+      if (parts.length === 0) continue;
+      headers.set(arg.apiName ?? arg.name, parts.map((part) => Array.isArray(part) ? part.join('=') : part).join(','));
     }
 
     // Cookie parameters serialize as `name=value` pairs joined by "; " in a
