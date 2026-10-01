@@ -289,28 +289,30 @@ function applyAuth(manifest, tool, url, headers) {
 function parameterStyle(arg) {
   return arg.style ?? (arg.location === 'query' ? 'form' : 'simple');
 }
+function arrayParameterParts(style, explode, value) {
+  const items = value.filter((item) => item !== null).map(String);
+  // Nothing but nulls leaves nothing to send, not an empty "name=".
+  if (items.length === 0) return [];
+  if (style === 'spaceDelimited') return [items.join(' ')];
+  if (style === 'pipeDelimited') return [items.join('|')];
+  if (style === 'form' && explode) return items;
+  return [items.join(',')];
+}
+function objectParameterParts(arg, style, explode, value) {
+  const entries = Object.entries(value).filter(([, v]) => v !== null);
+  if (entries.length === 0) return [];
+  const scalar = (item) => String(item);
+  if (style === 'deepObject' && arg.location === 'query') return entries.map(([k, v]) => [k, scalar(v)]);
+  if (style === 'form' && explode) return entries.map(([k, v]) => [k, scalar(v)]);
+  if (style === 'simple' && explode) return [entries.map(([k, v]) => `${k}=${scalar(v)}`).join(',')];
+  return [entries.flatMap(([k, v]) => [k, scalar(v)]).join(',')];
+}
 function parameterParts(arg, value) {
   const style = parameterStyle(arg);
   const explode = arg.explode ?? (style === 'form');
-  const scalar = (item) => String(item);
-  if (Array.isArray(value)) {
-    const items = value.filter((item) => item !== null).map(scalar);
-    // Nothing but nulls leaves nothing to send, not an empty "name=".
-    if (items.length === 0) return [];
-    if (style === 'spaceDelimited') return [items.join(' ')];
-    if (style === 'pipeDelimited') return [items.join('|')];
-    if (style === 'form' && explode) return items;
-    return [items.join(',')];
-  }
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value).filter(([, v]) => v !== null);
-    if (entries.length === 0) return [];
-    if (style === 'deepObject' && arg.location === 'query') return entries.map(([k, v]) => [k, scalar(v)]);
-    if (style === 'form' && explode) return entries.map(([k, v]) => [k, scalar(v)]);
-    if (style === 'simple' && explode) return [entries.map(([k, v]) => `${k}=${scalar(v)}`).join(',')];
-    return [entries.flatMap(([k, v]) => [k, scalar(v)]).join(',')];
-  }
-  return [scalar(value)];
+  if (Array.isArray(value)) return arrayParameterParts(style, explode, value);
+  if (value !== null && typeof value === 'object') return objectParameterParts(arg, style, explode, value);
+  return [String(value)];
 }
 /** Reserved expansion, with query syntax delimiters kept percent-encoded. */
 function encodeReservedQueryValue(value) {
