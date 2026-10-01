@@ -55,12 +55,12 @@ test('3.1 type unions collapse to Forge-readable types', async () => {
   assert.ok(getPet);
   // Keep the declared path input type; stringify only at the wire boundary.
   const petId = getPet.args.find((a) => a.name === 'petId');
-  assert.equal(petId?.schema.type, 'integer');
-  // ["integer", "null"] on a query param collapses to a plain integer argument.
+  assert.deepEqual(petId?.schema.type, ['integer', 'null']);
+  // The manifest restores the null branch after Forge type adaptation.
   const verbose = getPet.args.find((a) => a.name === 'verbose');
   // Forge's metadata collapses the union to number; the manifest restores
   // the declared integer type (#137).
-  assert.equal(verbose?.schema.type, 'integer', '["integer", "null"] collapses to integer in the manifest schema (#137)');
+  assert.deepEqual(verbose?.schema.type, ['integer', 'null'], 'nullable integer input keeps both branches');
   // Mixed primitive branches survive Forge's adapted string fallback (#150).
   const include = getPet.args.find((a) => a.name === 'include');
   assert.deepEqual(include?.schema, { anyOf: [{ type: 'string' }, { type: 'integer' }], description: 'Extra data to include.' });
@@ -181,11 +181,10 @@ test('#81 nullability survives into the request input schema', async () => {
     'input schema admits a valid null',
   );
 
-  // The nullable query param stays a plain numeric argument, with the
-  // declared integer type restored in the manifest schema (#137).
+  // Nullable query inputs preserve integer and null after Forge adaptation.
   const getPet = m.tools.find((t) => t.name === 'get_pet');
   const verbose = getPet?.args.find((a) => a.name === 'verbose');
-  assert.equal(verbose?.schema.type, 'integer');
+  assert.deepEqual(verbose?.schema.type, ['integer', 'null']);
   assert.equal(verbose?.required, false);
 });
 

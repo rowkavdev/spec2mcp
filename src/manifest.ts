@@ -240,10 +240,22 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
     if (itemComposition) {
       // Same for an items composition: the items' own constraints and the
       // outer array constraints both survive (review on #151).
-      return applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
+      return restoreParameterNullability(applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved), resolved);
     }
   }
-  return applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
+  return restoreParameterNullability(applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved), resolved);
+}
+
+/** Forge drops 3.0 nullable markers on scalar/array parameters and their items. */
+function restoreParameterNullability(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!source || typeof source !== 'object') return schema;
+  if (source.nullable === true && typeof source.type === 'string' && typeof schema.type === 'string') {
+    schema.type = [schema.type, 'null'];
+  }
+  const items = schema.items as Record<string, unknown> | undefined;
+  const sourceItems = resolveDocRef(source.items) as Record<string, unknown> | undefined;
+  if (items && sourceItems) restoreParameterNullability(items, sourceItems);
+  return schema;
 }
 
 /**
