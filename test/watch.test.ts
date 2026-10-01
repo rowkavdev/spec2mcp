@@ -5,6 +5,7 @@ import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { watchSpec } from '../src/watch.js';
+import { loadSpec, localRefDependencies } from '../src/load.js';
 
 async function until(predicate: () => boolean): Promise<void> {
   for (let i = 0; i < 100; i++) {
@@ -140,4 +141,31 @@ test('#161 overlay-only edits and atomic replacement trigger generation', async 
     await until(() => generated === 3);
     await writeFile(overlay, 'third'); await new Promise(resolve => setTimeout(resolve, 250)); assert.equal(generated, 3);
   } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('#156 editing only an externally referenced file triggers generation', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-watch-ref-'));
+  const spec = join(dir, 'spec.json');
+  const defs = join(dir, 'defs.json');
+  const seen: string[] = [];
+  let handle;
+  try {
+    await writeFile(defs, JSON.stringify({ type: 'object', properties: { v: { type: 'string' } } }));
+    await writeFile(spec, JSON.stringify({
+      openapi: '3.0.3', info: { title: 'Ref', version: '1' }, components: { schemas: {} },
+      paths: { '/x': { get: { operationId: 'getX', responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: './defs.json' } } } } } } } },
+    }));
+    const generate = async () => {
+      const doc = await loadSpec(spec) as any;
+      seen.push(doc.paths['/x'].get.responses['200'].content['application/json'].schema.properties.v.type);
+    };
+    handle = await watchSpec(spec, generate, { log() {}, discoverInputs: () => localRefDependencies(spec) });
+    assert.deepEqual(seen, ['string']);
+    await writeFile(defs, JSON.stringify({ type: 'object', properties: { v: { type: 'integer' } } }));
+    await until(() => seen.length === 2);
+    assert.deepEqual(seen, ['string', 'integer']);
+  } finally {
+    handle?.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

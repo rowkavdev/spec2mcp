@@ -9,7 +9,7 @@ export type WatchHandle = { close(): void };
 export async function watchSpec(
   input: string,
   generate: () => Promise<void>,
-  options: { pollIntervalMs?: number; requestTimeoutMs?: number; retryIntervalMs?: number; additionalInputs?: string[]; log?: (message: string) => void } = {},
+  options: { pollIntervalMs?: number; requestTimeoutMs?: number; retryIntervalMs?: number; additionalInputs?: string[]; discoverInputs?: () => Promise<string[]>; log?: (message: string) => void } = {},
 ): Promise<WatchHandle> {
   const log = options.log ?? ((message: string) => console.error(message));
   const isUrl = /^https?:\/\//i.test(input);
@@ -26,7 +26,8 @@ export async function watchSpec(
   let fingerprint: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   let pollTimer: NodeJS.Timeout | undefined;
-  const watchers: FSWatcher[] = [];
+  let watchers: FSWatcher[] = [];
+  let watchedKey = '';
   const additionalInputs = [...new Set((options.additionalInputs ?? []).map(file => resolve(file)))];
 
   async function digest(): Promise<string> {
@@ -38,12 +39,32 @@ export async function watchSpec(
         })()
       : await readFile(input);
     const hash = createHash('sha256').update(bytes);
-    for (const file of additionalInputs) {
-      const extra = await readFile(file);
+    // Files the spec pulls in through external $refs. Discovery fails while the
+    // root is invalid; the next refresh finds them again once it parses.
+    const discovered = await (options.discoverInputs?.() ?? Promise.resolve([])).catch(() => []);
+    const dependencies = [...new Set(discovered.map(file => resolve(file)))]
+      .filter(file => !additionalInputs.includes(file) && (isUrl || file !== resolve(input)))
+      .sort();
+    syncWatchers(dependencies);
+    for (const file of [...additionalInputs, ...dependencies]) {
+      const extra = await readFile(file).catch((err: NodeJS.ErrnoException) => { if (dependencies.includes(file) && err.code === 'ENOENT') return Buffer.alloc(0); throw err; });
       hash.update(JSON.stringify([file, extra.length]));
       hash.update(extra);
     }
     return hash.digest('hex');
+  }
+
+  function syncWatchers(dependencies: string[]): void {
+    if (closed) return;
+    const files = [...new Set([...(isUrl ? [] : [resolve(input)]), ...additionalInputs, ...dependencies])];
+    const key = files.join('\0');
+    if (key === watchedKey) return;
+    watchedKey = key;
+    for (const watcher of watchers) watcher.close();
+    watchers = watchLocalInputs(files, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { void refresh(); }, 100);
+    }, log);
   }
 
   async function refresh(): Promise<void> {
@@ -75,11 +96,7 @@ export async function watchSpec(
   if (isUrl) {
     pollTimer = setInterval(() => { void refresh(); }, interval);
   }
-  const localFiles = [...new Set([...(isUrl ? [] : [resolve(input)]), ...additionalInputs])];
-  watchers.push(...watchLocalInputs(localFiles, () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => { void refresh(); }, 100);
-  }, log));
+  syncWatchers([]);
   await refresh();
   log(`Watching ${input}${isUrl ? ` every ${interval / 1000}s` : ''} for changes (Ctrl+C to stop).`);
   return {

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { init } from '../vendor/forge/index.js';
 import { applyOverlays } from './overlay.js';
-import { ensureOperationIds, loadOverlays, loadSpec } from './load.js';
+import { ensureOperationIds, loadOverlays, loadSpec, localRefDependencies } from './load.js';
 import type { OpenAPIV3 } from 'openapi-types';
 import { buildManifest, DEFAULT_31_DIALECT } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
@@ -183,7 +183,7 @@ async function main(): Promise<void> {
     if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: values.config }]);
     const seconds = values['poll-interval'] === undefined ? 30 : Number(values['poll-interval']);
     if (!Number.isFinite(seconds) || seconds <= 0) fail('--poll-interval must be a positive number of seconds');
-    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000, additionalInputs: config.overlays ?? [] });
+    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000, additionalInputs: config.overlays ?? [], discoverInputs: () => localRefDependencies(spec) });
     process.once('SIGINT', () => { handle.close(); process.exit(0); });
     process.once('SIGTERM', () => { handle.close(); process.exit(0); });
   } else if (command === 'serve') {
