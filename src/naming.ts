@@ -47,7 +47,9 @@ export function toEnvPrefix(title: string): string {
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toUpperCase();
-  return s.length > 0 ? s : 'API';
+  if (s.length === 0) return 'API';
+  // A shell, .env file or systemd unit cannot define a name that starts with a digit.
+  return /^[0-9]/.test(s) ? `API_${s}` : s;
 }
 
 /** UPPER_SNAKE rendering of a scheme name, e.g. "bearerAuth" -> BEARER_AUTH. */

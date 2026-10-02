@@ -194,3 +194,20 @@ test('#136 unsupported aliases warn while #146 preserves all usable OR alternati
   assert.ok(m.auth.warnings.some(w => w.includes('digestAlias') && w.includes('unsupported')));
   assert.deepEqual(m.auth.schemes.map(s => s.schemeName), ['bearer', 'basic']);
 });
+
+test('a title that starts with a digit still gives a valid env var name', async () => {
+  const doc = {
+    openapi: '3.0.3',
+    info: { title: '3D Printing API', version: '1.0.0' },
+    servers: [{ url: 'https://api.print.test' }],
+    security: [{ key: [] }],
+    components: { schemas: {}, securitySchemes: { key: { type: 'http', scheme: 'bearer' } } },
+    paths: { '/jobs': { get: { operationId: 'listJobs', responses: { '200': { description: 'ok' } } } } },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await init(doc as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = buildManifest(doc as any);
+  assert.match(m.auth.schemes[0]?.envVar ?? '', /^[A-Z_][A-Z0-9_]*$/);
+  assert.match(m.auth.baseUrlEnvVar ?? '', /^[A-Z_][A-Z0-9_]*$/);
+});
