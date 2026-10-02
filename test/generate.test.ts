@@ -111,8 +111,8 @@ test('#188 watch startup rejects overlapping output before opening a watcher', a
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('#298 --poll-interval above the timer limit is rejected instead of polling every millisecond', async () => {
-  for (const seconds of ['3000000', '2147484']) {
+test('#298 --poll-interval above the timer limit is rejected instead of polling continuously', async () => {
+  for (const seconds of ['3000000', '2147484', '0.0001', '0.5']) {
     await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', 'https://example.invalid/spec.json', '--watch', '--poll-interval', seconds], { timeout: 5000 }),
       (error: unknown) => /--poll-interval must be/i.test((error as { stderr: string }).stderr), seconds);
   }
