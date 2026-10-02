@@ -129,6 +129,7 @@ async function cmdServe(spec: string, flags: ManifestOptions & { name?: string; 
   else await runtime.runServer(manifest);
 }
 
+const MIN_POLL_SECONDS = 1;
 const MAX_POLL_SECONDS = 2_147_483;
 
 async function main(): Promise<void> {
@@ -193,7 +194,7 @@ async function main(): Promise<void> {
     if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: values.config }]);
     const seconds = values['poll-interval'] === undefined ? 30 : Number(values['poll-interval']);
     // Node clamps timer delays above 2^31-1 ms to 1 ms, which would poll the URL continuously (#298).
-    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_POLL_SECONDS) fail(`--poll-interval must be a positive number of seconds, at most ${MAX_POLL_SECONDS}`);
+    if (!Number.isFinite(seconds) || seconds < MIN_POLL_SECONDS || seconds > MAX_POLL_SECONDS) fail(`--poll-interval must be between ${MIN_POLL_SECONDS} and ${MAX_POLL_SECONDS} seconds`);
     const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000, additionalInputs: config.overlays ?? [], discoverInputs: () => localRefDependencies(spec) });
     process.once('SIGINT', () => { handle.close(); process.exit(0); });
     process.once('SIGTERM', () => { handle.close(); process.exit(0); });
