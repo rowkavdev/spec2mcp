@@ -62,7 +62,7 @@ spec2mcp <spec> [options]          # shorthand for generate
 | --- | --- | --- |
 | `-o, --out <dir>` | generate | Output directory; defaults to `./<name>-mcp`. Generation overwrites the files it owns there, including on a watch update, and preserves everything else (including `node_modules`, so installed dependencies survive regeneration). Do not keep hand edits to generated files there while regenerating. |
 | `--name <name>` | both | MCP server name; otherwise derived from the spec title. Also changes the prefix of generated auth and base-URL variable names. |
-| `--base-url <url>` | both | Override the first URL in the spec's root `servers` array. If neither is set, provide `<PREFIX>_BASE_URL` to the running server. |
+| `--base-url <url>` | both | Override the first URL in the spec's root `servers` array. Must be an absolute http or https URL. If neither is set, provide `<PREFIX>_BASE_URL` to the running server. |
 | `--env-prefix <prefix>` | both | Fixed prefix for generated auth and base-URL variable names, instead of deriving it from the spec title. Must be a valid variable name: letters, digits and underscores, not starting with a digit. Overlapping words collapse (`CLOUDFLARE_API` + `API_TOKEN` -> `CLOUDFLARE_API_TOKEN`). |
 | `--overlay <file>` | both | Repeatable: apply OpenAPI Overlay v1.0.0 files, in order, before generation. Each action targets nodes by JSONPath, deep-merges `update`, or removes the node with `remove: true`; an unmatched target fails the run. |
 | `--include <selector>` | both | Repeatable: generate or serve matching operations only. |
