@@ -69,7 +69,7 @@ spec2mcp <spec> [options]          # shorthand for generate
 | `--exclude <selector>` | both | Repeatable: omit matching operations, even if included. |
 | `--config <file>` | both | Read JSON settings from this file. Without the flag, use `./spec2mcp.config.json` if present. |
 | `--watch` | generate | Generate initially and regenerate on local file changes or URL changes; errors print to stderr and are retried. Stop with Ctrl+C. |
-| `--poll-interval <seconds>` | generate with `--watch` and HTTP(S) URL | Positive URL polling interval; default 30 seconds. Not accepted with local files. |
+| `--poll-interval <seconds>` | generate with `--watch` and HTTP(S) URL | Positive URL polling interval, at most 2147483 seconds (the timer limit); default 30 seconds. Not accepted with local files. |
 | `--transport <stdio\|http>` | serve | Default stdio; HTTP is local Streamable HTTP. A generated project's transport uses `npm start` or `npm run start:http` instead. |
 | `--port <number>` | serve with `--transport http` | HTTP port, default 3000; integer 0-65535. Port 0 asks the OS for an available port. For generated projects use `PORT`, default 3000. |
 | `-h, --help` | both | Show CLI help. |
