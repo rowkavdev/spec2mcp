@@ -18,6 +18,9 @@ type OverlayAction = { target?: unknown; update?: unknown; remove?: unknown };
 export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[]): OpenAPIV3.Document {
   for (const { name, overlay } of overlays) {
     overlay.actions.forEach((action, i) => {
+      if (typeof action !== 'object' || action === null || Array.isArray(action)) {
+        throw new Error(`Overlay ${name} action ${i + 1} must be an object.`);
+      }
       const { target, update, remove } = action as OverlayAction;
       if (typeof target !== 'string' || target.length === 0) {
         throw new Error(`Overlay ${name} action ${i + 1} is missing a string "target".`);
@@ -28,6 +31,12 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
         resultType: 'all',
         wrap: true,
       }) as { value: unknown; parent: Record<string, unknown> | unknown[] | null; parentProperty: string | number | null }[];
+      if (remove !== undefined && typeof remove !== 'boolean') {
+        throw new Error(`Overlay ${name} action ${i + 1} "remove" must be true or false: ${target}`);
+      }
+      if (remove !== true && update === undefined) {
+        throw new Error(`Overlay ${name} action ${i + 1} has neither "update" nor "remove: true", so it would change nothing: ${target}`);
+      }
       if (matches.length === 0) {
         throw new Error(`Overlay ${name} action ${i + 1} target matched nothing in the spec: ${target}`);
       }
@@ -36,7 +45,9 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
         // parent so earlier deletions cannot shift later matches out of place.
         const arrayMatches = new Map<unknown[], Set<number>>();
         for (const match of matches) {
-          if (match.parent === null || match.parentProperty === null) continue;
+          if (match.parent === null || match.parentProperty === null) {
+            throw new Error(`Overlay ${name} action ${i + 1} cannot remove the document root: ${target}`);
+          }
           if (Array.isArray(match.parent) && typeof match.parentProperty === 'number') {
             const indices = arrayMatches.get(match.parent) ?? new Set<number>();
             indices.add(match.parentProperty);
