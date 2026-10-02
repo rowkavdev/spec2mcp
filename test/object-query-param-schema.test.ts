@@ -36,3 +36,23 @@ test('object query and header parameters keep properties, required keys and boun
   assert.equal(validate({ filter: { a: 'z' } }), false);
   assert.equal(validate({ filter: { a: 'x', n: 0 } }), false);
 });
+
+test('allOf-composed object query parameters keep their merged properties and required keys', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'AllOf params', version: '1' },
+    components: { schemas: { Base: { type: 'object', required: ['a'], properties: { a: { type: 'string' } } } } },
+    paths: { '/x': { get: {
+      operationId: 'getX',
+      parameters: [
+        { name: 'f', in: 'query', style: 'deepObject', explode: true, schema: { allOf: [{ $ref: '#/components/schemas/Base' }, { type: 'object', properties: { b: { type: 'integer' } } }] } },
+      ],
+      responses: { '200': { description: 'OK' } },
+    } } },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  const validate = compileOutputValidator(schema);
+  assert.ok(validate({ f: { a: 'x', b: 1 } }));
+  assert.equal(validate({ f: { b: 1 } }), false);
+  assert.equal(validate({ f: { a: 'x', b: 'no' } }), false);
+});
