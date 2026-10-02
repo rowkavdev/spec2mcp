@@ -67,7 +67,7 @@ before(async () => {
       tool('form', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'),
       { ...tool('formIgnoredHeaders', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { name: { style: 'form', explode: true } } },
       { ...tool('formCsv', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'form', explode: false } } },
-      { ...tool('formUnsupported', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'deepObject' } } },
+      { ...tool('formUnsupported', 'POST', [{ ...bodyArg(), schema: { type: 'object' } }], 'application/x-www-form-urlencoded'), formEncoding: { tags: { style: 'label' } } },
       tool('queryArray', 'GET', [{ name: 'tags', location: 'query', style: 'form', explode: false, required: false, schema: { type: 'array', items: { type: 'string' } } }]),
       tool('reserved', 'GET', [{ name: 'q', location: 'query', allowReserved: true, required: false, schema: { type: 'string' } }]),
       tool('reservedKeyCollision', 'GET', [{ name: 'api_key', location: 'query', allowReserved: true, required: false, schema: { type: 'string' } }]),
