@@ -14,6 +14,10 @@ Everything below is unreleased; it becomes the 0.1.0 release notes.
   the request instead of being sent as the text `null`, and a query array with
   `style: deepObject` is sent as `name[]=a&name[]=b` (what Stripe's `expand`
   expects).
+- **deepObject form bodies.** Form-encoded request bodies whose fields declare
+  `style: deepObject` (Stripe's whole write API) are sent as `name[key]=v`,
+  `name[]=v` and `name[0][key]=v`. Before, every such call failed with
+  "Unsupported form encoding", even when the field was not sent.
 - **Generator MVP.** `spec2mcp generate` turns an OpenAPI 3.x spec (JSON or
   YAML, file or URL) into a standalone MCP server project through
   a Forge transformer: external `$ref` bundling, synthesised and uniquified

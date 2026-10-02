@@ -181,14 +181,34 @@ function appendTextPart(form, arg, value) {
   form.append(arg.apiName ?? arg.name, part);
 }
 
-/** Encode flat OpenAPI form objects using per-property encoding rules. */
+/** Bracket-key form encoding for a deepObject field: name[key]=v for objects,
+ * name[]=v for scalar array items and name[0][key]=v for object items (the
+ * form Stripe-style APIs read). Nulls and empty containers send nothing. */
+function appendDeepForm(params, name, value) {
+  if (value === undefined || value === null) return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (item !== null && typeof item === 'object') appendDeepForm(params, `${name}[${index}]`, item);
+      else if (item !== undefined && item !== null) params.append(`${name}[]`, String(item));
+    });
+  } else if (typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) appendDeepForm(params, `${name}[${key}]`, item);
+  } else {
+    params.append(name, String(value));
+  }
+}
+
+const FORM_STYLES = ['form', 'spaceDelimited', 'pipeDelimited', 'deepObject'];
+
+/** Encode OpenAPI form objects using per-property encoding rules. */
 function formBody(value, encodings = {}) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ToolArgumentError('Argument "body" must be an object for application/x-www-form-urlencoded.');
   }
   const params = new URLSearchParams();
+  // An encoding this runtime cannot honor refuses the whole call, as before.
   for (const [key, encoding] of Object.entries(encodings)) {
-    if (encoding?.unsupported || !['form', 'spaceDelimited', 'pipeDelimited'].includes(encoding?.style ?? 'form')) {
+    if (encoding?.unsupported || !FORM_STYLES.includes(encoding?.style ?? 'form')) {
       throw new ToolArgumentError(`Unsupported form encoding for field "${key}".`);
     }
   }
@@ -200,8 +220,12 @@ function formBody(value, encodings = {}) {
     }
     const style = encoding.style ?? 'form';
     const explode = encoding.explode ?? (style === 'form');
-    if (!['form', 'spaceDelimited', 'pipeDelimited'].includes(style)) {
+    if (!FORM_STYLES.includes(style)) {
       throw new ToolArgumentError(`Unsupported form encoding style "${style}" for field "${key}".`);
+    }
+    if (style === 'deepObject') {
+      appendDeepForm(params, key, field);
+      continue;
     }
     if (field !== null && typeof field === 'object' && !Array.isArray(field)) {
       if (style !== 'form') throw new ToolArgumentError(`Object form field "${key}" requires form style.`);
