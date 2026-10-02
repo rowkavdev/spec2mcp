@@ -329,7 +329,26 @@ function objectParameterParts(arg, style, explode, value) {
   const entries = Object.entries(value).filter(([, v]) => v !== null);
   if (entries.length === 0) return [];
   const scalar = (item) => String(item);
-  if (style === 'deepObject' && arg.location === 'query') return entries.map(([k, v]) => [k, scalar(v)]);
+  const nested = (item) => item !== null && typeof item === 'object' && (!Array.isArray(item) || item.some((x) => x !== null && typeof x === 'object'));
+  // deepObject has no nested form in OpenAPI; the common one is
+  // name[outer][inner]=x. The caller wraps each key in
+  // brackets, so a nested key is joined with "][" here.
+  if (style === 'deepObject' && arg.location === 'query') {
+    const flatten = (object, path) => Object.entries(object).flatMap(([k, v]) => {
+      if (v === null) return [];
+      const key = path === '' ? k : `${path}][${k}`;
+      // The spec defines deepObject for objects only, so an array value keeps
+      // its previous flat form (a,b); an array of objects has no safe form.
+      if (Array.isArray(v) && v.some((x) => x !== null && typeof x === 'object')) throw new ToolArgumentError(`Parameter "${arg.name}" has an array of objects at "${key}", which cannot be sent as a deepObject query parameter.`);
+      if (Array.isArray(v)) return [[key, scalar(v)]];
+      if (typeof v === 'object') return flatten(v, key);
+      return [[key, scalar(v)]];
+    });
+    return flatten(value, '');
+  }
+  // Sending String({}) would put "[object Object]" on the wire.
+  const bad = entries.find(([, v]) => nested(v));
+  if (bad) throw new ToolArgumentError(`Parameter "${arg.name}" has a nested object at "${bad[0]}", which its ${style} style cannot express. Send a flat object.`);
   if (style === 'form' && explode) return entries.map(([k, v]) => [k, scalar(v)]);
   if (style === 'simple' && explode) return [entries.map(([k, v]) => `${k}=${scalar(v)}`).join(',')];
   return [entries.flatMap(([k, v]) => [k, scalar(v)]).join(',')];
@@ -584,7 +603,8 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
       const pair = `${encodeURIComponent(key)}=${encodeReservedQueryValue(item)}`;
       url.search += `${url.search ? '&' : ''}${pair}`;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof ToolArgumentError) return errorResult(error.message);
     return errorResult('Invalid request URL or header argument.');
   }
 
