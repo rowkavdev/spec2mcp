@@ -118,6 +118,11 @@ test('#298 --poll-interval above the timer limit is rejected instead of polling 
   }
 });
 
+test('#302 --help states the --poll-interval range', async () => {
+  const { stdout } = await run(process.execPath, [TSX, CLI, '--help']);
+  assert.match(stdout, /--poll-interval <seconds>\s+URL polling period with --watch, 1 to 2147483/);
+});
+
 test('#188 symlinked output parent cannot hide a protected spec', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-link-overlap-'));
   try {
