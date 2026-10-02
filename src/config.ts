@@ -42,6 +42,8 @@ export async function readProjectConfig(path = CONFIG_FILE): Promise<ProjectConf
   return config as ProjectConfig;
 }
 
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export function resolveConfig(config: ProjectConfig, flags: ProjectConfig): { options: ManifestOptions; config: ProjectConfig } {
   const effective: ProjectConfig = {
     ...(flags.name !== undefined || config.name !== undefined ? { name: flags.name ?? config.name } : {}),
@@ -51,5 +53,9 @@ export function resolveConfig(config: ProjectConfig, flags: ProjectConfig): { op
     ...(flags.include !== undefined || config.include !== undefined ? { include: flags.include ?? config.include } : {}),
     ...(flags.exclude !== undefined || config.exclude !== undefined ? { exclude: flags.exclude ?? config.exclude } : {}),
   };
+  // Generated credential variables are named <prefix>_*; a shell or .env file cannot define a name with spaces, dashes or a leading digit (#304).
+  if (effective.envPrefix !== undefined && !ENV_NAME.test(effective.envPrefix)) {
+    throw new Error(`--env-prefix / envPrefix must start with a letter or underscore and contain only letters, digits and underscores (got ${JSON.stringify(effective.envPrefix)})`);
+  }
   return { options: { serverName: effective.name, baseUrl: effective.baseUrl, envPrefix: effective.envPrefix, include: effective.include, exclude: effective.exclude }, config: effective };
 }
