@@ -39,7 +39,7 @@ Options:
       --env-prefix <prefix>            Override the auth environment variable prefix
       --overlay <file>                 Apply an OpenAPI Overlay before generating (repeatable)
       --watch                          Regenerate when the spec changes (generate only)
-      --poll-interval <seconds>        URL polling period with --watch (default: 30)
+      --poll-interval <seconds>        URL polling period with --watch, 1 to 2147483 (default: 30)
       --transport <stdio|http>         Transport (serve; default: stdio)
       --port <number>                  HTTP port (serve; default: 3000, localhost only)
       --include <selector>             Include operations (repeatable)
