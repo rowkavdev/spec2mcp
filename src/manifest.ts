@@ -243,6 +243,12 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
       return applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
     }
   }
+  // Query and header objects keep their declared properties, required keys
+  // and nested constraints, like cookie objects do (#259).
+  if (resolved?.type === 'object' && location !== 'path') {
+    const object = boundedParameterSchema(resolved, `${location} parameter "${p.name}"`, warnings);
+    return restoreNullable({ ...object, ...(p.description ? { description: p.description } : {}) }, resolved);
+  }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
   // A path value is always present, so only query and header values may be null.
   return location === 'path' ? base : restoreNullable(base, resolved);
