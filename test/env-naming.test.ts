@@ -35,6 +35,14 @@ test('--env-prefix overrides the derived prefix', async () => {
   assert.equal(m.auth.baseUrlEnvVar, 'MYAPI_BASE_URL');
 });
 
+test('#304 an explicit envPrefix that is not a valid variable name is rejected', () => {
+  for (const bad of ['my prefix', '1ABC', 'a-b', '']) {
+    assert.throws(() => resolveConfig({}, { envPrefix: bad }), /envPrefix must start with a letter/, bad);
+    assert.throws(() => resolveConfig({ envPrefix: bad }, {}), /envPrefix must start with a letter/, bad);
+  }
+  for (const good of ['MYAPI', 'my_api', '_X', 'A1']) assert.equal(resolveConfig({}, { envPrefix: good }).options.envPrefix, good);
+});
+
 test('config accepts envPrefix and overlays, flags win over config', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-cfg-'));
   try {
