@@ -245,7 +245,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   }
   // Query and header objects keep their declared properties, required keys
   // and nested constraints, like cookie objects do (#259).
-  if (resolved?.type === 'object' && location !== 'path') {
+  if ((resolved?.type === 'object' || (resolved?.type === undefined && p.type === 'object')) && location !== 'path') {
     const object = boundedParameterSchema(resolved, `${location} parameter "${p.name}"`, warnings);
     return restoreNullable({ ...object, ...(p.description ? { description: p.description } : {}) }, resolved);
   }
