@@ -220,6 +220,22 @@ function boundedParameterSchema(source: unknown, label: string, warnings: string
   }
 }
 
+/**
+ * Query and header objects keep their declared properties, required keys and
+ * nested constraints, like cookie objects do (#259).
+ */
+function objectParameterSchema(resolved: Record<string, unknown> | undefined, p: ParameterInfo, label: string, warnings: string[]): Record<string, unknown> {
+  const object = boundedParameterSchema(resolved, label, warnings);
+  const described: Record<string, unknown> = { ...object, ...(p.description ? { description: p.description } : {}) };
+  // A composed schema has no type to widen, so a nullable one is wrapped
+  // instead (allOf alone would reject null).
+  if (resolved?.type === undefined && resolved?.nullable === true && described.type === undefined) {
+    const { description, ...inner } = described;
+    return { anyOf: [inner, { type: 'null' }], ...(description ? { description } : {}) };
+  }
+  return restoreNullable(described, resolved);
+}
+
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
@@ -243,11 +259,8 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
       return applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
     }
   }
-  // Query and header objects keep their declared properties, required keys
-  // and nested constraints, like cookie objects do (#259).
   if ((resolved?.type === 'object' || (resolved?.type === undefined && p.type === 'object')) && location !== 'path') {
-    const object = boundedParameterSchema(resolved, `${location} parameter "${p.name}"`, warnings);
-    return restoreNullable({ ...object, ...(p.description ? { description: p.description } : {}) }, resolved);
+    return objectParameterSchema(resolved, p, `${location} parameter "${p.name}"`, warnings);
   }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
   // A path value is always present, so only query and header values may be null.

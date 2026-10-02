@@ -56,3 +56,22 @@ test('allOf-composed object query parameters keep their merged properties and re
   assert.equal(validate({ f: { b: 1 } }), false);
   assert.equal(validate({ f: { a: 'x', b: 'no' } }), false);
 });
+
+test('a nullable allOf-composed object query parameter still accepts null', async () => {
+  const doc = {
+    openapi: '3.0.3', info: { title: 'Nullable allOf', version: '1' }, components: { schemas: {} },
+    paths: { '/x': { get: {
+      operationId: 'getX',
+      parameters: [
+        { name: 'f', in: 'query', style: 'deepObject', explode: true, schema: { nullable: true, allOf: [{ type: 'object', required: ['a'], properties: { a: { type: 'string' } } }] } },
+      ],
+      responses: { '200': { description: 'OK' } },
+    } } },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.inputSchema;
+  const validate = compileOutputValidator(schema);
+  assert.ok(validate({ f: null }));
+  assert.ok(validate({ f: { a: 'x' } }));
+  assert.equal(validate({ f: { b: 1 } }), false);
+});
