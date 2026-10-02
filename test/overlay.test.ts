@@ -120,3 +120,13 @@ test('#53 overlay update never merges into an inherited property', () => {
   assert.deepEqual(operation.description, { updated: true });
   assert.deepEqual(inherited.description, { original: true });
 });
+
+test('an overlay action that would change nothing fails instead of passing silently', () => {
+  const run = (action: unknown) => applyOverlays({ a: { b: 1 } } as never, [{ name: 'o.yaml', overlay: { overlay: '1.0.0', actions: [action] } }] as never);
+  assert.throws(() => run({ target: '$.a' }), /neither "update" nor "remove: true"/);
+  assert.throws(() => run({ target: '$.a', remove: false }), /neither "update" nor "remove: true"/);
+  assert.throws(() => run({ target: '$.a', remove: 'true' }), /"remove" must be true or false/);
+  assert.throws(() => run({ target: '$', remove: true }), /cannot remove the document root/);
+  assert.throws(() => run(null), /action 1 must be an object/);
+  assert.doesNotThrow(() => run({ target: '$.a', remove: false, update: { c: 2 } }));
+});
