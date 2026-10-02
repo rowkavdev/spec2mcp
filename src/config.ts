@@ -57,5 +57,13 @@ export function resolveConfig(config: ProjectConfig, flags: ProjectConfig): { op
   if (effective.envPrefix !== undefined && !ENV_NAME.test(effective.envPrefix)) {
     throw new Error(`--env-prefix / envPrefix must start with a letter or underscore and contain only letters, digits and underscores (got ${JSON.stringify(effective.envPrefix)})`);
   }
+  // An explicit base URL that cannot be fetched makes every generated tool fail at call time (#306).
+  if (effective.baseUrl !== undefined && effective.baseUrl !== '') {
+    let protocol: string | undefined;
+    try { protocol = new URL(effective.baseUrl).protocol; } catch { /* reported below */ }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new Error(`--base-url / baseUrl must be an absolute http(s) URL (got ${JSON.stringify(effective.baseUrl)})`);
+    }
+  }
   return { options: { serverName: effective.name, baseUrl: effective.baseUrl, envPrefix: effective.envPrefix, include: effective.include, exclude: effective.exclude }, config: effective };
 }

@@ -43,6 +43,14 @@ test('#304 an explicit envPrefix that is not a valid variable name is rejected',
   for (const good of ['MYAPI', 'my_api', '_X', 'A1']) assert.equal(resolveConfig({}, { envPrefix: good }).options.envPrefix, good);
 });
 
+test('#306 an explicit baseUrl that is not an absolute http(s) URL is rejected', () => {
+  for (const bad of ['not a url', 'ftp://x', 'javascript:alert(1)', '/api']) {
+    assert.throws(() => resolveConfig({}, { baseUrl: bad }), /baseUrl must be an absolute http\(s\) URL/, bad);
+    assert.throws(() => resolveConfig({ baseUrl: bad }, {}), /baseUrl must be an absolute http\(s\) URL/, bad);
+  }
+  for (const good of ['https://api.example.com/v1', 'http://127.0.0.1:8080', '']) assert.equal(resolveConfig({}, { baseUrl: good }).options.baseUrl, good);
+});
+
 test('config accepts envPrefix and overlays, flags win over config', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-cfg-'));
   try {
