@@ -79,6 +79,9 @@ before(async () => {
       { ...tool('pathLabel', 'GET', [{ name: 'tags', location: 'path', style: 'label', explode: true, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
       { ...tool('pathLabelObject', 'GET', [{ name: 'tags', location: 'path', style: 'label', explode: true, required: true, schema: { type: 'object' } }]), path: '/path/{tags}' },
       { ...tool('pathMatrix', 'GET', [{ name: 'tags', location: 'path', style: 'matrix', explode: true, required: true, schema: { type: 'array', items: { type: 'string' } } }]), path: '/path/{tags}' },
+      ...['simple', 'label', 'matrix'].map((style) => ({
+        ...tool(`pathNested_${style}`, 'GET', [{ name: 'tags', location: 'path', style, explode: true, required: true, schema: { type: 'array', items: {} } }]), path: '/path/{tags}',
+      })),
       tool('xml', 'POST', [{ ...bodyArg(), schema: { type: 'string' } }], 'application/xml'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
       { ...tool('getFile', 'GET', [{ name: 'name', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{name}/data' },
@@ -339,3 +342,15 @@ test('#144 required body with minProperties rejects a missing body client-side a
   assert.equal(seen.at(-1)!.body.toString('utf8'), '{"note":"hi"}');
   assert.equal(seen.at(-1)!.headers['content-type'], 'application/json');
 });
+
+for (const style of ['simple', 'label', 'matrix']) {
+  for (const [kind, value] of [['objects', [{ id: 1 }]], ['nested arrays', [['a', 'b']]]] as const) {
+    test(`path ${style} rejects arrays containing ${kind} before requesting upstream`, async () => {
+      const count = seen.length;
+      const result = await call(`pathNested_${style}`, { tags: value });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /array of objects or nested arrays/);
+      assert.equal(seen.length, count);
+    });
+  }
+}

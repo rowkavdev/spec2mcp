@@ -313,7 +313,13 @@ function applyAuth(manifest, tool, url, headers) {
 function parameterStyle(arg) {
   return arg.style ?? (arg.location === 'query' ? 'form' : 'simple');
 }
+function rejectNestedParameterArray(arg, style, value) {
+  if (value.some((item) => item !== null && typeof item === 'object')) {
+    throw new ToolArgumentError(`Parameter "${arg.name}" has an array of objects or nested arrays, which its ${style} style cannot express. Use a content-based parameter for JSON values.`);
+  }
+}
 function arrayParameterParts(arg, style, explode, value) {
+  rejectNestedParameterArray(arg, style, value);
   const items = value.filter((item) => item !== null).map(String);
   // Nothing but nulls leaves nothing to send, not an empty "name=".
   if (items.length === 0) return [];
@@ -377,6 +383,7 @@ function pathParameter(arg, value) {
   const explode = arg.explode ?? false;
   const encode = (item) => encodeURIComponent(String(item));
   if (Array.isArray(value)) {
+    rejectNestedParameterArray(arg, style, value);
     const items = value.map(encode);
     if (style === 'label') return `.${items.join(explode ? '.' : ',')}`;
     if (style === 'matrix') {
@@ -518,6 +525,7 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
         }
       }
       catch (error) {
+        if (error instanceof ToolArgumentError) return errorResult(error.message);
         if (error instanceof URIError) return errorResult(`Invalid path argument "${arg.name}": malformed Unicode cannot be encoded.`);
         throw error;
       }

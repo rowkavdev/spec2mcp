@@ -59,6 +59,9 @@ before(async () => {
       operationId: 'search',
       parameters: [
         { name: 'filter', in: 'query', style: 'deepObject', explode: true, schema: { type: 'object', additionalProperties: true } },
+        { name: 'records', in: 'query', schema: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+        { name: 'x-records', in: 'header', schema: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+        { name: 'cookies', in: 'cookie', schema: { type: 'array', items: { type: 'object', additionalProperties: true } } },
         { name: 'plain', in: 'query', schema: { type: 'object', additionalProperties: true } },
       ],
       responses: { '200': { description: 'OK' } },
@@ -109,4 +112,14 @@ test('a nested object in a form-style object parameter is an error, not [object 
   assert.equal(res.isError, true);
   assert.match(res.content?.[0]?.text ?? '', /nested object/);
   assert.equal(seen.length, before);
+});
+
+test('arrays of objects in query, header and cookie parameters fail without an upstream call', async () => {
+  for (const name of ['records', 'x-records', 'cookies']) {
+    const before = seen.length;
+    const res = await callTool('search', { [name]: [{ id: 1 }] });
+    assert.equal(res.isError, true, name);
+    assert.match(res.content?.[0]?.text ?? '', /array of objects/);
+    assert.equal(seen.length, before, name);
+  }
 });
