@@ -63,8 +63,10 @@ function mapScheme(name: string, def: OpenAPIV3.SecuritySchemeObject, envPrefix:
 /** Follow an internal `#/...` security-scheme reference, decoding JSON Pointer escapes. */
 function resolveSecuritySchemeRef(doc: OpenAPIV3.Document, ref: string): unknown {
   if (!ref.startsWith('#/')) return undefined;
+  let pointer: string;
+  try { pointer = decodeURIComponent(ref.slice(1)); } catch { return undefined; }
   let cur: unknown = doc;
-  for (const segment of ref.slice(2).split('/').map((s) => s.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+  for (const segment of pointer.slice(1).split('/').map((s) => s.replaceAll('~1', '/').replaceAll('~0', '~'))) {
     if (!cur || typeof cur !== 'object') return undefined;
     cur = (cur as Record<string, unknown>)[segment];
   }
