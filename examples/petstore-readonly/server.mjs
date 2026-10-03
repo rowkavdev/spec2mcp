@@ -509,7 +509,14 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
       // Check the encoded wire segment, not String(value): label-style empty
       // arrays/objects serialize as '.', which WHATWG URL then normalizes.
       let segment;
-      try { segment = pathParameter(arg, value); }
+      try {
+        if (arg.parameterContentType) {
+          if (!isJsonType(baseContentType(arg.parameterContentType))) return errorResult(`Unsupported path content media type "${arg.parameterContentType}".`);
+          segment = encodeURIComponent(JSON.stringify(value));
+        } else {
+          segment = pathParameter(arg, value);
+        }
+      }
       catch (error) {
         if (error instanceof URIError) return errorResult(`Invalid path argument "${arg.name}": malformed Unicode cannot be encoded.`);
         throw error;
