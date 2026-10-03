@@ -239,7 +239,7 @@ function objectParameterSchema(resolved: Record<string, unknown> | undefined, p:
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
-  if ((location === 'query' || location === 'header') && media.length === 1) {
+  if (media.length === 1) {
     return boundedParameterSchema(media[0]![1].schema, `${location} parameter "${p.name}"`, warnings, isJsonMediaType(media[0]![0]));
   }
   const source = candidate?.schema as Record<string, unknown> | undefined;
@@ -1020,7 +1020,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const args: ToolArg[] = [];
     const nullableParents: { arg: ToolArg; node: Record<string, unknown> }[] = [];
     for (const p of op.pathParams) {
-      args.push({ name: p.name, location: 'path', required: true, schema: parameterArgSchema(doc, op, p, 'path', warnings), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
+      const media = Object.keys(sourceParameter(doc, op, p.name, 'path')?.content ?? {});
+      args.push({ name: p.name, location: 'path', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: true, schema: parameterArgSchema(doc, op, p, 'path', warnings), ...(p.style !== undefined ? { style: p.style } : {}), ...(p.explode !== undefined ? { explode: p.explode } : {}), ...(p.allowReserved !== undefined ? { allowReserved: p.allowReserved } : {}) });
     }
     // A path placeholder with no declared parameter would otherwise stay
     // literal in the URL and hit the upstream as "{id}" (#152). Synthesize
