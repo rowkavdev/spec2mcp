@@ -27,3 +27,21 @@ test('cyclic and dangling security aliases terminate with a warning', () => {
     assert.match(auth.warnings.join('\n'), /missing or unsupported/);
   }
 });
+
+test('security aliases decode percent-encoded URI fragments before JSON Pointer escapes', () => {
+  const { auth, forOperation } = buildAuthPlan(document({
+    'Bearer Auth/é': { type: 'http', scheme: 'bearer' },
+    Alias: { $ref: '#/components/securitySchemes/Bearer%20Auth~1%C3%A9' },
+  }), 'ALIASES');
+  assert.deepEqual(forOperation({ security: [{ Alias: [] }], responses: {} }, 'GET /').names, ['Alias']);
+  assert.equal(auth.schemes[0]?.schemeName, 'Alias');
+  assert.deepEqual(auth.warnings, []);
+});
+
+test('malformed percent-encoded security fragments remain unsupported without crashing', () => {
+  const { auth, forOperation } = buildAuthPlan(document({
+    Alias: { $ref: '#/components/securitySchemes/%ZZ' },
+  }), 'ALIASES');
+  assert.deepEqual(forOperation({ security: [{ Alias: [] }], responses: {} }, 'GET /').names, []);
+  assert.match(auth.warnings.join('\n'), /missing or unsupported/);
+});
