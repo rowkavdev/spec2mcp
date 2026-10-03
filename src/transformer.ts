@@ -71,7 +71,7 @@ function generatedReadme(manifest: Manifest): string {
   lines.push('```json');
   lines.push('{');
   lines.push('  "mcpServers": {');
-  lines.push(`    "${manifest.serverName}": {`);
+  lines.push(`    ${JSON.stringify(manifest.serverName)}: {`);
   lines.push('      "command": "node",');
   lines.push(`      "args": ["/absolute/path/to/server.mjs"]${manifest.auth.schemes.length > 0 ? ',' : ''}`);
   if (manifest.auth.schemes.length > 0) {
