@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { watchSpec } from '../src/watch.js';
+import { watchSpec, type WatchHandle } from '../src/watch.js';
 import { loadSpec, localRefDependencies } from '../src/load.js';
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -169,3 +169,19 @@ test('#156 editing only an externally referenced file triggers generation', asyn
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+for (const options of [{ pollIntervalMs: 2_147_483_648 }, { retryIntervalMs: 2_147_483_648 }]) {
+  test(`watch rejects oversized ${Object.keys(options)[0]} before starting work`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-watch-limit-'));
+    const file = join(dir, 'spec.yaml');
+    let generations = 0;
+    let handle: WatchHandle | undefined;
+    try {
+      await writeFile(file, 'valid');
+      await assert.rejects(async () => {
+        handle = await watchSpec(file, async () => { generations++; }, { ...options, log() {} });
+      }, /interval must be.*2147483647/i);
+      assert.equal(generations, 0);
+    } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+}
