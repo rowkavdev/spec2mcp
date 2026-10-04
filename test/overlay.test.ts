@@ -158,3 +158,13 @@ for (const selector of ['[0]', '[1]', '[0,2]']) {
     assert.deepEqual(doc.paths['/a']!.get!.tags, expected);
   });
 }
+
+test('an invalid update target does not partially change earlier matches', () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Atomic target validation', version: '1' }, paths: {},
+    'x-targets': [{ description: 'original' }, 'not an object'],
+  } as unknown as OpenAPIV3.Document;
+  assert.throws(() => applyOverlays(doc, [{ name: 'test', overlay: { overlay: '1.0.0', info: { title: 'test', version: '1' }, actions: [
+    { target: "$['x-targets'][*]", update: { description: 'changed' } },
+  ] } }]), /target must resolve to an object/);
+  assert.equal((doc as any)['x-targets'][0].description, 'original');
+});

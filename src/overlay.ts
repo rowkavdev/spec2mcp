@@ -67,6 +67,8 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
           if (typeof match.value !== 'object' || match.value === null || Array.isArray(match.value)) {
             throw new Error(`Overlay ${name} action ${i + 1} target must resolve to an object for "update": ${target}`);
           }
+        }
+        for (const match of matches) {
           deepMerge(match.value as Record<string, unknown>, update);
         }
       }
