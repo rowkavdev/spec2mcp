@@ -123,3 +123,9 @@ test('arrays of objects in query, header and cookie parameters fail without an u
     assert.equal(seen.length, before, name);
   }
 });
+
+test('nested deepObject arrays omit null elements without adding empty values', async () => {
+  const res = await callTool('search', { filter: { tags: ['a', null, 'b'], empty: [null, null] } });
+  assert.ok(!res.isError, res.content?.[0]?.text ?? '');
+  assert.equal(seen.at(-1)!.url, '/search?filter%5Btags%5D=a%2Cb');
+});
