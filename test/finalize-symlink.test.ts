@@ -67,3 +67,14 @@ test('#214 a pre-planted symlink at the predictable temp path cannot redirect th
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('finalize rejects sibling paths whose name shares the output prefix', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-prefix-traversal-'));
+  try {
+    const doc = { openapi: '3.0.3', info: { title: 'Traversal', version: '1' }, components: { schemas: {} }, paths: {} } as any;
+    const forge = await init(doc);
+    const out = join(dir, 'out');
+    await assert.rejects(forge.finalize(out, [{ path: '../outside/file.txt', content: 'escape' }]), /Path traversal detected/);
+    await assert.rejects(readFile(join(dir, 'outside', 'file.txt')), { code: 'ENOENT' });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
