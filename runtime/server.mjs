@@ -346,7 +346,10 @@ function objectParameterParts(arg, style, explode, value) {
       // The spec defines deepObject for objects only, so an array value keeps
       // its previous flat form (a,b); an array of objects has no safe form.
       if (Array.isArray(v) && v.some((x) => x !== null && typeof x === 'object')) throw new ToolArgumentError(`Parameter "${arg.name}" has an array of objects at "${key}", which cannot be sent as a deepObject query parameter.`);
-      if (Array.isArray(v)) return [[key, scalar(v)]];
+      if (Array.isArray(v)) {
+        const items = v.filter((item) => item !== null);
+        return items.length > 0 ? [[key, scalar(items)]] : [];
+      }
       if (typeof v === 'object') return flatten(v, key);
       return [[key, scalar(v)]];
     });
