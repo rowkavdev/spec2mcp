@@ -228,3 +228,58 @@ test('generation refuses to overwrite an external reference file inside output',
     assert.equal(await readFile(dependency, 'utf8'), original);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('generation protects local dependencies referenced only by an overlay', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-overlay-ref-overlap-'));
+  try {
+    const out = join(dir, 'out');
+    await mkdir(out);
+    const dependency = join(out, 'operations.json');
+    const original = JSON.stringify({ type: 'string' });
+    await writeFile(dependency, original);
+    const spec = join(dir, 'spec.json');
+    await writeFile(spec, JSON.stringify({ openapi: '3.0.3', info: { title: 'Overlay refs', version: '1' }, paths: {} }));
+    const overlay = join(dir, 'overlay.json');
+    await writeFile(overlay, JSON.stringify({ overlay: '1.0.0', info: { title: 'Ref', version: '1' }, actions: [
+      { target: '$.info', update: { 'x-schema': { $ref: './out/operations.json' } } },
+    ] }));
+    await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', spec, '--overlay', overlay, '--out', out]),
+      (error: unknown) => /output directory contains.*reference.*input/i.test((error as { stderr: string }).stderr));
+    assert.equal(await readFile(dependency, 'utf8'), original);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+for (const ref of ['./missing.json', 'http://example.invalid/x.json', 'http://127.0.0.1:1/x.json', '#/info']) {
+  test(`overlay data reference ${ref} is not resolved by generation`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-overlay-data-'));
+    try {
+      const spec = join(dir, 'spec.json');
+      await writeFile(spec, JSON.stringify({ openapi: '3.0.3', info: { title: 'Overlay data', version: '1' }, paths: {} }));
+      const overlay = join(dir, 'overlay.json');
+      await writeFile(overlay, JSON.stringify({ overlay: '1.0.0', info: { title: 'Ref', version: '1' }, actions: [
+        { target: '$.info', update: { 'x-data': { $ref: ref } } },
+      ] }));
+      const result = await run(process.execPath, [TSX, CLI, 'generate', spec, '--overlay', overlay, '--out', join(dir, 'out')]);
+      assert.match(result.stdout, /Generated 0 tools/);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+}
+
+test('overlay reference protection uses the spec folder when the overlay lives elsewhere', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-overlay-base-'));
+  try {
+    await mkdir(join(dir, 'overlays'));
+    await mkdir(join(dir, 'out'));
+    const spec = join(dir, 'spec.json');
+    await writeFile(spec, JSON.stringify({ openapi: '3.0.3', info: { title: 'Overlay base', version: '1' }, paths: {} }));
+    const dependency = join(dir, 'out', 'operations.json');
+    await writeFile(dependency, '{}');
+    const overlay = join(dir, 'overlays', 'overlay.json');
+    await writeFile(overlay, JSON.stringify({ overlay: '1.0.0', info: { title: 'Ref', version: '1' }, actions: [
+      { target: '$.info', update: { 'x-data': { $ref: './out/operations.json' } } },
+    ] }));
+    await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', spec, '--overlay', overlay, '--out', join(dir, 'out')]),
+      (error: unknown) => /output directory contains.*reference.*input/i.test((error as { stderr: string }).stderr));
+    assert.equal(await readFile(dependency, 'utf8'), '{}');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

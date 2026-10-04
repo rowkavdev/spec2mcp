@@ -8,7 +8,7 @@ import { parse as parseYaml } from 'yaml';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import { convert as convertSwagger2 } from 'swagger2openapi';
 import type { OpenAPIV3 } from 'openapi-types';
-import { basename, resolve as resolvePath } from 'node:path';
+import { basename, dirname, resolve as resolvePath } from 'node:path';
 import type { ApiOverlay, ApiOverlayFile } from '../vendor/forge/index.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
@@ -520,4 +520,23 @@ export async function localRefDependencies(input: string): Promise<string[]> {
   const refs = await $RefParser.resolve(input) as unknown as { paths(...types: string[]): string[] };
   const root = resolvePath(input);
   return refs.paths('file').map((file: string) => resolvePath(file)).filter((file: string) => file !== root);
+}
+
+/** Overlay references are data: collect local paths without resolving or reading targets. */
+export async function localOverlayReferencePaths(spec: string, paths: string[]): Promise<string[]> {
+  if (/^https?:\/\//i.test(spec)) return [];
+  const result = new Set<string>();
+  const base = dirname(resolvePath(spec));
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === '$ref' && typeof value === 'string') {
+        if (value.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(value)) continue;
+        const file = value.split('#', 1)[0];
+        if (file) result.add(resolvePath(base, file));
+      } else walk(value);
+    }
+  };
+  for (const file of await loadOverlays(paths)) walk(file.overlay);
+  return [...result];
 }

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { init } from '../vendor/forge/index.js';
 import { applyOverlays } from './overlay.js';
-import { ensureOperationIds, loadOverlays, loadSpec, localRefDependencies } from './load.js';
+import { ensureOperationIds, loadOverlays, loadSpec, localOverlayReferencePaths, localRefDependencies } from './load.js';
 import type { OpenAPIV3 } from 'openapi-types';
 import { buildManifest, DEFAULT_31_DIALECT } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
@@ -82,7 +82,8 @@ function warnIfFiltersRemovedEverything(manifest: { tools: unknown[] }, flags: M
 }
 
 async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }, config: ProjectConfig, configPath?: string): Promise<void> {
-  const referencedInputs = (await localRefDependencies(spec)).map((path) => ({ label: 'reference', path }));
+  const referenceFiles = await Promise.all([localRefDependencies(spec), localOverlayReferencePaths(spec, config.overlays ?? [])]);
+  const referencedInputs = [...new Set(referenceFiles.flat())].map((path) => ({ label: 'reference', path }));
   if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }, ...referencedInputs]);
   const doc = await loadEffectiveSpec(spec, config.overlays ?? []);
   const forge = await init(doc);
