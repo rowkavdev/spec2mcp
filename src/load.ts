@@ -119,6 +119,9 @@ function sanitizeComponentKeys(doc: OpenAPIV3.Document): void {
   if (!components || typeof components !== 'object') return;
   const renames = new Map<string, string>();
   for (const [section, bucket] of Object.entries(components)) {
+    // Security requirement keys reference scheme names, not JSON Pointers.
+    // Keep those names intact; the auth resolver decodes pointer escapes.
+    if (section === 'securitySchemes') continue;
     if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) continue;
     const rec = bucket as Record<string, unknown>;
     const taken = new Set(Object.keys(rec));
