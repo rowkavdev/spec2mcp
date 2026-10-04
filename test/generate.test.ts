@@ -209,3 +209,22 @@ test('#164 watch regeneration preserves installed dependencies', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('generation refuses to overwrite an external reference file inside output', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-ref-overlap-'));
+  try {
+    const out = join(dir, 'out');
+    await mkdir(out);
+    const dependency = join(out, 'operations.json');
+    const original = JSON.stringify({ type: 'object', properties: { id: { type: 'integer' } } });
+    await writeFile(dependency, original);
+    const spec = join(dir, 'spec.json');
+    await writeFile(spec, JSON.stringify({ openapi: '3.0.3', info: { title: 'Refs', version: '1' },
+      paths: { '/': { get: { operationId: 'get', responses: { '200': { description: 'ok', content: {
+        'application/json': { schema: { $ref: './out/operations.json' } },
+      } } } } } } }));
+    await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', spec, '--out', out]),
+      (error: unknown) => /output directory contains.*reference.*input/i.test((error as { stderr: string }).stderr));
+    assert.equal(await readFile(dependency, 'utf8'), original);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
