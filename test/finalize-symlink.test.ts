@@ -78,3 +78,16 @@ test('finalize rejects sibling paths whose name shares the output prefix', async
     await assert.rejects(readFile(join(dir, 'outside', 'file.txt')), { code: 'ENOENT' });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('finalize validates output paths before cleaning existing files', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-clean-validation-'));
+  try {
+    const out = join(dir, 'out');
+    await mkdir(out);
+    const existing = join(out, 'keep.txt');
+    await writeFile(existing, 'keep');
+    const forge = await init(DOC as never);
+    await assert.rejects(forge.finalize(out, [{ path: '../escape.txt', content: 'bad' }], { clean: true }), /Path traversal detected/);
+    assert.equal(await readFile(existing, 'utf8'), 'keep');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
