@@ -12,8 +12,8 @@ function matches(selector: string, operationId: string, tags: readonly string[])
     if (char === '*') return '.*';
     if (char === '?') return '.';
     return char.replace(/[\\^$+.()|[\]{}]/g, '\\$&');
-  }).join('')}$`;
-  return new RegExp(pattern).test(operationId);
+  }).join('')}(?![\\s\\S])`;
+  return new RegExp(pattern, 'su').test(operationId);
 }
 
 export function operationIncluded(
