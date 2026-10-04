@@ -274,8 +274,8 @@ export class Forge {
   // ---------------------------------------------------------------------------
 
   #createByOperationId() {
-    const byOperationId: Record<string, OpenAPIV3.OperationObject> = {};
-    const duplicateOperationIds: Record<string, OpenAPIV3.OperationObject[]> = {};
+    const byOperationId: Record<string, OpenAPIV3.OperationObject> = Object.create(null);
+    const duplicateOperationIds: Record<string, OpenAPIV3.OperationObject[]> = Object.create(null);
     for (const [path, pathItem] of Object.entries(this.#openapi.paths)) {
       if (!pathItem) continue;
 
