@@ -185,3 +185,18 @@ for (const options of [{ pollIntervalMs: 2_147_483_648 }, { retryIntervalMs: 2_1
     } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
   });
 }
+
+for (const requestTimeoutMs of [0.5, 2_147_483_648, 4_294_967_296]) {
+  test(`watch rejects invalid AbortSignal timeout ${requestTimeoutMs} before startup`, async () => {
+    let handle: WatchHandle | undefined;
+    const originalFetch = globalThis.fetch;
+    let hits = 0;
+    globalThis.fetch = async () => { hits++; return new Response('spec'); };
+    try {
+      await assert.rejects(async () => {
+        handle = await watchSpec('https://example.invalid/spec', async () => {}, { requestTimeoutMs, log() {} });
+      }, /Request timeout must be an integer between 1 and 2147483647/);
+      assert.equal(hits, 0);
+    } finally { handle?.close(); globalThis.fetch = originalFetch; }
+  });
+}
