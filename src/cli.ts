@@ -82,16 +82,17 @@ function warnIfFiltersRemovedEverything(manifest: { tools: unknown[] }, flags: M
 }
 
 async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string; name?: string }, config: ProjectConfig, configPath?: string): Promise<void> {
-  if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
+  const referencedInputs = (await localRefDependencies(spec)).map((path) => ({ label: 'reference', path }));
+  if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }, ...referencedInputs]);
   const doc = await loadEffectiveSpec(spec, config.overlays ?? []);
   const forge = await init(doc);
   const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
   warnIfFiltersRemovedEverything(probe, flags);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
-  await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
+  await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }, ...referencedInputs]);
   const files = await forge.transform(createMcpTransformer(doc, { ...flags, serverName: flags.name, projectConfig: { name: probe.serverName, baseUrl: probe.baseUrl, ...(config.envPrefix !== undefined ? { envPrefix: config.envPrefix } : {}), include: config.include ?? [], exclude: config.exclude ?? [] }, runtimeSource: await runtimeSource() }));
-  await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
+  await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }, ...referencedInputs]);
   // Overwrite only the files the generator owns; a recursive clean used to
   // erase node_modules and leave an installed server unstartable (#164).
   await forge.finalize(outDir, files);
