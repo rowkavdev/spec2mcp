@@ -824,8 +824,8 @@ function selected(tool, config) {
     if (!value) return false;
     if (!operationOnly && (tool.tags ?? []).includes(value)) return true;
     if (tagOnly) return false;
-    const pattern = `^${[...value].map((char) => char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[\\^$+.()|[\]{}]/g, '\\$&')).join('')}$`;
-    return new RegExp(pattern).test(tool.operationId);
+    const pattern = `^${[...value].map((char) => char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[\\^$+.()|[\]{}]/g, '\\$&')).join('')}(?![\\s\\S])`;
+    return new RegExp(pattern, 'su').test(tool.operationId);
   };
   return (!(config.include?.length) || config.include.some(matches)) && !(config.exclude ?? []).some(matches);
 }

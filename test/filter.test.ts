@@ -33,3 +33,9 @@ test('tag selector filters using original OpenAPI tags', async () => {
   assert.deepEqual(result.tools.map((tool) => tool.operationId), ['listPets']);
   assert.deepEqual(result.tools[0]?.tags, ['catalog']);
 });
+
+test('operation globs match the whole identifier including newline and Unicode characters', () => {
+  assert.equal(operationIncluded('get\n', [], { include: ['operation:get'] }), false);
+  assert.equal(operationIncluded('get\nitem', [], { include: ['operation:get*'] }), true);
+  assert.equal(operationIncluded('get😀', [], { include: ['operation:get?'] }), true);
+});
