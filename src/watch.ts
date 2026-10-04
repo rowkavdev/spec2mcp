@@ -59,12 +59,13 @@ export async function watchSpec(
     const files = [...new Set([...(isUrl ? [] : [resolve(input)]), ...additionalInputs, ...dependencies])];
     const key = files.join('\0');
     if (key === watchedKey) return;
-    watchedKey = key;
-    for (const watcher of watchers) watcher.close();
-    watchers = watchLocalInputs(files, () => {
+    const nextWatchers = watchLocalInputs(files, () => {
       clearTimeout(timer);
       timer = setTimeout(() => { void refresh(); }, 100);
     }, log);
+    for (const watcher of watchers) watcher.close();
+    watchers = nextWatchers;
+    watchedKey = key;
   }
 
   async function refresh(): Promise<void> {
@@ -117,11 +118,18 @@ function watchLocalInputs(files: string[], changed: () => void, log: (message: s
     names.add(basename(file)); directories.set(dirname(file), names);
   }
   // Watch parents so atomic replacement is picked up for every generation input.
-  return [...directories].map(([directory, names]) => {
-    const watcher = watchDirectory(directory, (_event, filename) => {
-      if (filename === null || names.has(filename.toString())) changed();
-    });
-    watcher.on('error', (err) => log(`Watch: ${err.message}`));
-    return watcher;
-  });
+  const watchers: FSWatcher[] = [];
+  try {
+    for (const [directory, names] of directories) {
+      const watcher = watchDirectory(directory, (_event, filename) => {
+        if (filename === null || names.has(filename.toString())) changed();
+      });
+      watcher.on('error', (err) => log(`Watch: ${err.message}`));
+      watchers.push(watcher);
+    }
+    return watchers;
+  } catch (error) {
+    for (const watcher of watchers) watcher.close();
+    throw error;
+  }
 }
