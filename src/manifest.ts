@@ -479,7 +479,15 @@ function pinBodyDiscriminator(source: unknown, schema: Record<string, unknown>):
     const properties = { ...(branch.properties as Record<string, unknown> | undefined) };
     const constraint = { enum: values };
     setOwn(properties, property, Object.hasOwn(properties, property) ? { allOf: [properties[property], constraint] } : constraint);
-    return { ...branch, properties, required: [...new Set([...(Array.isArray(branch.required) ? branch.required : []), property])] };
+    // Ajv excludes __proto__ from properties; an exact pattern keeps its
+    // discriminator constraint active in both runtime and SDK validation.
+    const patternProperties = { ...(branch.patternProperties as Record<string, unknown> | undefined) };
+    if (property === '__proto__') {
+      const pattern = '^__proto__$';
+      setOwn(patternProperties, pattern, Object.hasOwn(patternProperties, pattern)
+        ? { allOf: [patternProperties[pattern], properties[property]] } : properties[property]);
+    }
+    return { ...branch, properties, ...(property === '__proto__' ? { patternProperties } : {}), required: [...new Set([...(Array.isArray(branch.required) ? branch.required : []), property])] };
   });
   return schema;
 }
