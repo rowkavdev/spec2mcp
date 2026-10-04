@@ -164,7 +164,7 @@ export class Forge {
    * Returns total count and a breakdown by method name (descending by frequency).
    */
   methodStats(): { total: number; byMethod: Record<string, number> } {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number> = Object.create(null);
     let total = 0;
 
     for (const [_name, schema] of this.commands) {
