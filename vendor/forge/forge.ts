@@ -202,10 +202,12 @@ export class Forge {
    * to write the files to disk.
    */
   async transform(fn: TransformerFn): Promise<SourceFile[]> {
-    await fn(this);
-    const snapshot = [...this.#files];
-    this.#files.length = 0;
-    return snapshot;
+    try {
+      await fn(this);
+      return [...this.#files];
+    } finally {
+      this.#files.length = 0;
+    }
   }
 
   /**
