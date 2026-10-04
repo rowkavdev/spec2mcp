@@ -89,6 +89,7 @@ async function cmdGenerate(spec: string, flags: ManifestOptions & { out?: string
   const forge = await init(doc);
   const probe = buildManifest(doc, { serverName: flags.name, baseUrl: flags.baseUrl, envPrefix: flags.envPrefix, include: flags.include, exclude: flags.exclude });
   for (const warning of probe.auth.warnings) console.error(`warning: ${warning}`);
+  for (const warning of probe.warnings ?? []) console.error(`warning: ${warning}`);
   warnIfFiltersRemovedEverything(probe, flags);
   const outDir = flags.out ?? `./${probe.serverName}-mcp`;
   await assertOutputDoesNotContainInputs(outDir, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }, ...referencedInputs]);
