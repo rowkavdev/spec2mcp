@@ -332,9 +332,9 @@ function arrayParameterParts(arg, style, explode, value) {
   return [items.join(',')];
 }
 function objectParameterParts(arg, style, explode, value) {
-  const entries = Object.entries(value).filter(([, v]) => v !== null);
+  const entries = Object.entries(value).filter(([, v]) => v !== null && (!Array.isArray(v) || v.length === 0 || v.some((item) => item !== null)));
   if (entries.length === 0) return [];
-  const scalar = (item) => String(item);
+  const scalar = (item) => String(Array.isArray(item) ? item.filter((value) => value !== null) : item);
   const nested = (item) => item !== null && typeof item === 'object' && (!Array.isArray(item) || item.some((x) => x !== null && typeof x === 'object'));
   // deepObject has no nested form in OpenAPI; the common one is
   // name[outer][inner]=x. The caller wraps each key in

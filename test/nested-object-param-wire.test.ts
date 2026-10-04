@@ -129,3 +129,9 @@ test('nested deepObject arrays omit null elements without adding empty values', 
   assert.ok(!res.isError, res.content?.[0]?.text ?? '');
   assert.equal(seen.at(-1)!.url, '/search?filter%5Btags%5D=a%2Cb');
 });
+
+test('flat form object array values omit null elements rather than inserting empty values', async () => {
+  const res = await callTool('search', { plain: { tags: ['a', null, 'b'], empty: [null, null] } });
+  assert.ok(!res.isError, res.content?.[0]?.text ?? '');
+  assert.equal(seen.at(-1)!.url, '/search?tags=a%2Cb');
+});
