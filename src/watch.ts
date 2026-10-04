@@ -16,7 +16,7 @@ export async function watchSpec(
   const interval = options.pollIntervalMs ?? 30_000;
   if (!Number.isFinite(interval) || interval < 1 || interval > 2_147_483_647) throw new Error('Poll interval must be between 1 and 2147483647 milliseconds');
   const requestTimeout = options.requestTimeoutMs ?? 30_000;
-  if (!Number.isFinite(requestTimeout) || requestTimeout <= 0) throw new Error('Request timeout must be a positive number');
+  if (!Number.isInteger(requestTimeout) || requestTimeout < 1 || requestTimeout > 2_147_483_647) throw new Error('Request timeout must be an integer between 1 and 2147483647 milliseconds');
   const retryInterval = options.retryIntervalMs ?? 1_000;
   if (!Number.isFinite(retryInterval) || retryInterval < 1 || retryInterval > 2_147_483_647) throw new Error('Retry interval must be between 1 and 2147483647 milliseconds');
   let retryTimer: NodeJS.Timeout | undefined;
