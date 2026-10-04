@@ -46,3 +46,18 @@ for (const explicit of [true, false]) {
     assert.equal(validate({ body: { petType: 'unknown', meow: true } }), false);
   });
 }
+
+test('a discriminator named constructor does not inherit an object prototype property', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Prototype discriminator', version: '1' }, components: { schemas: {
+    Cat: { type: 'object', properties: { meow: { type: 'boolean' } } },
+    Dog: { type: 'object', properties: { bark: { type: 'boolean' } } },
+  } }, paths: { '/': { post: { operationId: 'post', requestBody: { required: true, content: { 'application/json': { schema: {
+    oneOf: [{ $ref: '#/components/schemas/Cat' }, { $ref: '#/components/schemas/Dog' }],
+    discriminator: { propertyName: 'constructor' },
+  } } } }, responses: { '200': { description: 'ok' } } } } } } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.inputSchema;
+  const validate = compileOutputValidator(JSON.parse(JSON.stringify(schema)));
+  assert.equal(validate({ body: { constructor: 'Cat', meow: true } }), true);
+  assert.equal(validate({ body: { constructor: 'unknown' } }), false);
+});

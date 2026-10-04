@@ -478,7 +478,7 @@ function pinBodyDiscriminator(source: unknown, schema: Record<string, unknown>):
     const branch = branches[index]!;
     const properties = { ...(branch.properties as Record<string, unknown> | undefined) };
     const constraint = { enum: values };
-    setOwn(properties, property, properties[property] ? { allOf: [properties[property], constraint] } : constraint);
+    setOwn(properties, property, Object.hasOwn(properties, property) ? { allOf: [properties[property], constraint] } : constraint);
     return { ...branch, properties, required: [...new Set([...(Array.isArray(branch.required) ? branch.required : []), property])] };
   });
   return schema;
