@@ -76,3 +76,16 @@ test('a discriminator named __proto__ does not inherit an object prototype prope
   assert.equal(validate({ body: JSON.parse('{"__proto__":"Cat","meow":true}') }), true);
   assert.equal(validate({ body: JSON.parse('{"__proto__":"unknown"}') }), false);
 });
+
+test('a required __proto__ discriminator rejects a missing own field', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Proto required', version: '1' }, components: { schemas: {
+    Cat: { type: 'object', properties: { meow: { type: 'boolean' } }, additionalProperties: false },
+    Dog: { type: 'object', properties: { bark: { type: 'boolean' } }, additionalProperties: false },
+  } }, paths: { '/': { post: { operationId: 'post', requestBody: { required: true, content: { 'application/json': { schema: {
+    oneOf: [{ $ref: '#/components/schemas/Cat' }, { $ref: '#/components/schemas/Dog' }], discriminator: { propertyName: '__proto__' },
+  } } } }, responses: { '200': { description: 'ok' } } } } } } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const validate = compileOutputValidator(JSON.parse(JSON.stringify(buildManifest(doc).tools[0]!.inputSchema)));
+  assert.equal(validate({ body: { meow: true } }), false);
+  assert.equal(validate({ body: JSON.parse('{"__proto__":"Cat","meow":true}') }), true);
+});

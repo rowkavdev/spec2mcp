@@ -487,7 +487,7 @@ function pinBodyDiscriminator(source: unknown, schema: Record<string, unknown>):
       setOwn(patternProperties, pattern, Object.hasOwn(patternProperties, pattern)
         ? { allOf: [patternProperties[pattern], properties[property]] } : properties[property]);
     }
-    return { ...branch, properties, ...(property === '__proto__' ? { patternProperties } : {}), required: [...new Set([...(Array.isArray(branch.required) ? branch.required : []), property])] };
+    return { ...branch, properties, ...(property === '__proto__' ? { patternProperties, allOf: [...(Array.isArray(branch.allOf) ? branch.allOf : []), { not: { propertyNames: { not: { const: property } } } }] } : {}), required: [...new Set([...(Array.isArray(branch.required) ? branch.required : []), property])] };
   });
   return schema;
 }
