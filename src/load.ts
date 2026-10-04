@@ -527,8 +527,10 @@ export async function localOverlayReferencePaths(spec: string, paths: string[]):
   if (/^https?:\/\//i.test(spec)) return [];
   const result = new Set<string>();
   const base = dirname(resolvePath(spec));
+  const seen = new WeakSet<object>();
   const walk = (node: unknown): void => {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
     for (const [key, value] of Object.entries(node)) {
       if (key === '$ref' && typeof value === 'string') {
         if (value.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(value)) continue;
