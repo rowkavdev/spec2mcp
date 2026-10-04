@@ -200,3 +200,22 @@ for (const requestTimeoutMs of [0.5, 2_147_483_648, 4_294_967_296]) {
     } finally { handle?.close(); globalThis.fetch = originalFetch; }
   });
 }
+
+test('watch recovers when a discovered dependency parent appears after startup', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-watch-missing-parent-'));
+  const root = join(dir, 'spec.yaml');
+  const nested = join(dir, 'missing', 'dep.yaml');
+  let generations = 0;
+  let handle: WatchHandle | undefined;
+  try {
+    await writeFile(root, 'root');
+    handle = await watchSpec(root, async () => { generations++; },
+      { discoverInputs: async () => [nested], retryIntervalMs: 30, log() {} });
+    await (await import('node:fs/promises')).mkdir(join(dir, 'missing'));
+    await writeFile(nested, 'first');
+    await until(() => generations >= 1);
+    const count = generations;
+    await writeFile(nested, 'second');
+    await until(() => generations > count);
+  } finally { handle?.close(); await rm(dir, { recursive: true, force: true }); }
+});
