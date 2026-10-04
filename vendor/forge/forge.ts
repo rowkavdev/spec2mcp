@@ -83,8 +83,8 @@ export class SourceFile {
 export class Forge {
   readonly #openapi: OpenAPIV3.Document;
 
-  #byOperationId: Record<string, OpenAPIV3.OperationObject> = {};
-  #verbPathByOperationId: Record<string, string> = {};
+  #byOperationId: Record<string, OpenAPIV3.OperationObject> = Object.create(null);
+  #verbPathByOperationId: Record<string, string> = Object.create(null);
 
   /**
    * Overlay command schemas keyed by product name (e.g. "d1", "dns", "zones").
@@ -313,9 +313,9 @@ export class Forge {
         }
       }
     }
-    this.#byOperationId = Object.fromEntries(
+    this.#byOperationId = Object.assign(Object.create(null), Object.fromEntries(
       Object.entries(byOperationId).toSorted((a, b) => a[0].localeCompare(b[0])),
-    );
+    ));
 
     if (Object.keys(duplicateOperationIds).length > 0) {
       console.error(JSON.stringify(Object.keys(duplicateOperationIds), null, 2));
