@@ -145,3 +145,16 @@ test('multi-target updates do not share inserted arrays between operations', () 
   assert.deepEqual(doc.paths['/b']!.get!.tags, ['shared']);
   assert.deepEqual(update.tags, ['shared']);
 });
+
+for (const selector of ['[0]', '[1]', '[0,2]']) {
+  test(`explicit array removal ${selector} splices values without leaving holes`, () => {
+    const doc = { openapi: '3.0.3', info: { title: 'Index removal', version: '1' }, paths: {
+      '/a': { get: { tags: ['a', 'b', 'c'], responses: {} } },
+    } } as unknown as OpenAPIV3.Document;
+    applyOverlays(doc, [{ name: 'test', overlay: { overlay: '1.0.0', info: { title: 'test', version: '1' }, actions: [
+      { target: `$.paths['/a'].get.tags${selector}`, remove: true },
+    ] } }]);
+    const expected = selector === '[0]' ? ['b', 'c'] : selector === '[1]' ? ['a', 'c'] : ['b'];
+    assert.deepEqual(doc.paths['/a']!.get!.tags, expected);
+  });
+}

@@ -48,9 +48,11 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
           if (match.parent === null || match.parentProperty === null) {
             throw new Error(`Overlay ${name} action ${i + 1} cannot remove the document root: ${target}`);
           }
-          if (Array.isArray(match.parent) && typeof match.parentProperty === 'number') {
+          const arrayIndex = typeof match.parentProperty === 'number' ? match.parentProperty
+            : /^(0|[1-9][0-9]*)$/.test(String(match.parentProperty)) ? Number(match.parentProperty) : undefined;
+          if (Array.isArray(match.parent) && arrayIndex !== undefined && Number.isSafeInteger(arrayIndex)) {
             const indices = arrayMatches.get(match.parent) ?? new Set<number>();
-            indices.add(match.parentProperty);
+            indices.add(arrayIndex);
             arrayMatches.set(match.parent, indices);
           } else {
             delete (match.parent as Record<string, unknown>)[String(match.parentProperty)];
