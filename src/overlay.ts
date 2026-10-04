@@ -80,7 +80,7 @@ function deepMerge(target: Record<string, unknown>, update: unknown): void {
   for (const [key, value] of Object.entries(update)) {
     const existing = Object.hasOwn(target, key) ? target[key] : undefined;
     if (isPlainObject(existing) && isPlainObject(value)) deepMerge(existing, value);
-    else target[key] = value;
+    else target[key] = structuredClone(value);
   }
 }
 

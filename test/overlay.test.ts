@@ -1,3 +1,4 @@
+import type { OpenAPIV3 } from 'openapi-types';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -129,4 +130,18 @@ test('an overlay action that would change nothing fails instead of passing silen
   assert.throws(() => run({ target: '$', remove: true }), /cannot remove the document root/);
   assert.throws(() => run(null), /action 1 must be an object/);
   assert.doesNotThrow(() => run({ target: '$.a', remove: false, update: { c: 2 } }));
+});
+
+test('multi-target updates do not share inserted arrays between operations', () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Independent updates', version: '1' }, paths: {
+    '/a': { get: { responses: {} } }, '/b': { get: { responses: {} } },
+  } } as unknown as OpenAPIV3.Document;
+  const update = { tags: ['shared'] };
+  applyOverlays(doc, [{ name: 'test', overlay: { overlay: '1.0.0', info: { title: 'test', version: '1' }, actions: [
+    { target: '$.paths.*.get', update },
+    { target: "$.paths['/a'].get.tags[*]", remove: true },
+  ] } }]);
+  assert.deepEqual(doc.paths['/a']!.get!.tags, []);
+  assert.deepEqual(doc.paths['/b']!.get!.tags, ['shared']);
+  assert.deepEqual(update.tags, ['shared']);
 });
