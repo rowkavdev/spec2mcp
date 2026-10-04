@@ -118,3 +118,20 @@ test('#141 writeOnly stripping never rewrites const, enum, default or examples l
   assert.deepEqual(blob.examples, [literal], 'examples literal preserved verbatim');
   assert.deepEqual(blob.enum, [literal, { plain: true }], 'enum literals preserved verbatim');
 });
+
+test('allOf response required lists do not require writeOnly fields declared in sibling branches', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Composed output', version: '1' }, components: { schemas: {} },
+    paths: { '/': { get: { operationId: 'get', responses: { '200': { description: 'ok', content: { 'application/json': { schema: {
+      type: 'object', allOf: [
+        { type: 'object', properties: { secret: { type: 'string', writeOnly: true }, id: { type: 'integer' } } },
+        { type: 'object', required: ['secret', 'id'] },
+      ],
+    } } } } } } } },
+  } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const schema = buildManifest(doc).tools[0]!.outputSchema!;
+  const { compileOutputValidator } = await import(new URL('../runtime/server.mjs', import.meta.url).href);
+  const validate = compileOutputValidator(schema);
+  assert.equal(validate({ id: 1 }), true);
+  assert.equal(validate({}), false);
+});

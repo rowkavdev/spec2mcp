@@ -594,15 +594,24 @@ const SCHEMA_SINGLE_KEYS = new Set(['items', 'additionalItems', 'additionalPrope
 const SCHEMA_ARRAY_KEYS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
 const SCHEMA_MAP_KEYS = new Set(['properties', 'patternProperties', 'dependentSchemas', '$defs', 'definitions']);
 
-function stripWriteOnlyRequired(node: unknown): void {
+function stripWriteOnlyRequired(node: unknown, inherited = new Set<string>()): void {
   if (!node || typeof node !== 'object' || Array.isArray(node)) return;
   const rec = node as Record<string, unknown>;
-  const properties = rec.properties as Record<string, unknown> | undefined;
+  const writeOnly = new Set(inherited);
+  const collect = (schema: Record<string, unknown>): void => {
+    const props = schema.properties;
+    if (props && typeof props === 'object') for (const [name, prop] of Object.entries(props)) {
+      if (prop && typeof prop === 'object' && (prop as Record<string, unknown>).writeOnly === true) writeOnly.add(name);
+    }
+    if (Array.isArray(schema.allOf)) for (const branch of schema.allOf) {
+      if (branch && typeof branch === 'object') collect(branch as Record<string, unknown>);
+    }
+  };
+  collect(rec);
   const required = rec.required;
-  if (Array.isArray(required) && properties && typeof properties === 'object') {
+  if (Array.isArray(required)) {
     const kept = required.filter((name) => {
-      const prop = properties[name as string] as Record<string, unknown> | undefined;
-      return !prop || typeof prop !== 'object' || prop.writeOnly !== true;
+      return !writeOnly.has(name as string);
     });
     if (kept.length === 0) delete rec.required;
     else rec.required = kept;
@@ -613,7 +622,7 @@ function stripWriteOnlyRequired(node: unknown): void {
   for (const key of SCHEMA_SINGLE_KEYS) stripWriteOnlyRequired(rec[key]);
   for (const key of SCHEMA_ARRAY_KEYS) {
     const value = rec[key];
-    if (Array.isArray(value)) for (const sub of value) stripWriteOnlyRequired(sub);
+    if (Array.isArray(value)) for (const sub of value) stripWriteOnlyRequired(sub, key === 'allOf' ? writeOnly : new Set());
   }
   for (const key of SCHEMA_MAP_KEYS) {
     const value = rec[key];
