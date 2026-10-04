@@ -218,10 +218,6 @@ export class Forge {
   async finalize(outputDir: string, files: SourceFile[], options?: { clean?: boolean }): Promise<SourceFile[]> {
     const resolvedOutputDir = resolve(outputDir);
 
-    if (options?.clean) {
-      await rm(resolvedOutputDir, { recursive: true, force: true });
-    }
-
     // Collect unique directories first, then create them all before writing
     const dirs = new Set<string>();
     const resolvedFiles = new Map<string, string>();
@@ -237,6 +233,10 @@ export class Forge {
 
       dirs.add(dirname(fullPath));
       resolvedFiles.set(fullPath, file.content);
+    }
+
+    if (options?.clean) {
+      await rm(resolvedOutputDir, { recursive: true, force: true });
     }
 
     // A symlinked path segment inside the output directory would redirect
