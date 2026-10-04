@@ -475,11 +475,37 @@ export async function loadOverlays(paths: string[]): Promise<ApiOverlayFile[]> {
 }
 
 /**
+ * YAML aliases can share path items or operations between paths. Detach
+ * repeated containers so repairing one occurrence cannot overwrite another.
+ */
+function detachSharedOperations(doc: OpenAPIV3.Document): void {
+  const pathItems = new WeakSet<object>();
+  const operations = new WeakSet<object>();
+  for (const [path, original] of Object.entries(doc.paths ?? {})) {
+    if (!original || typeof original !== 'object') continue;
+    const item = pathItems.has(original) ? { ...original } : original;
+    pathItems.add(original);
+    doc.paths[path] = item;
+    detachSharedMethods(item, operations);
+  }
+}
+
+function detachSharedMethods(item: OpenAPIV3.PathItemObject, operations: WeakSet<object>): void {
+  for (const method of HTTP_METHODS) {
+    const operation = item[method];
+    if (!operation || typeof operation !== 'object') continue;
+    if (operations.has(operation)) item[method] = { ...operation };
+    operations.add(operation);
+  }
+}
+
+/**
  * Forge indexes operations by operationId and silently skips operations that
  * have none. Many real-world specs omit them. Synthesise stable ids from
  * method + path so every operation becomes a tool, and uniquify collisions.
  */
 export function ensureOperationIds(doc: OpenAPIV3.Document): void {
+  detachSharedOperations(doc);
   const seen = new Set<string>();
   for (const [path, pathItem] of Object.entries(doc.paths ?? {})) {
     if (!pathItem || typeof pathItem !== 'object') continue;
