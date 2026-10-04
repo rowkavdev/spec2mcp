@@ -82,6 +82,9 @@ before(async () => {
       ...['simple', 'label', 'matrix'].map((style) => ({
         ...tool(`pathNested_${style}`, 'GET', [{ name: 'tags', location: 'path', style, explode: true, required: true, schema: { type: 'array', items: {} } }]), path: '/path/{tags}',
       })),
+      ...['simple', 'label', 'matrix'].map((style) => ({
+        ...tool(`pathNestedObject_${style}`, 'GET', [{ name: 'filter', location: 'path', style, explode: true, required: true, schema: { type: 'object', additionalProperties: true } }]), path: '/path/{filter}',
+      })),
       tool('xml', 'POST', [{ ...bodyArg(), schema: { type: 'string' } }], 'application/xml'),
       tool('headerValue', 'POST', [{ name: 'xTrace', apiName: 'X-Trace', location: 'header', required: false, schema: { type: 'string' } }]),
       { ...tool('getFile', 'GET', [{ name: 'name', location: 'path', required: true, schema: { type: 'string' } }]), path: '/files/{name}/data' },
@@ -353,4 +356,18 @@ for (const style of ['simple', 'label', 'matrix']) {
       assert.equal(seen.length, count);
     });
   }
+}
+
+for (const style of ['simple', 'label', 'matrix']) {
+  test(`path ${style} rejects nested object values without an upstream call`, async () => {
+    for (const filter of [{ a: { b: 'x' } }, { a: [{ b: 'x' }] }, { a: [['x', 'y']] }]) {
+      const count = seen.length;
+      const result = await call(`pathNestedObject_${style}`, { filter });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /nested (object|array)/);
+      assert.equal(seen.length, count);
+    }
+    const result = await call(`pathNestedObject_${style}`, { filter: { a: 'x', b: 2 } });
+    assert.equal(result.isError, undefined, 'flat scalar objects stay supported');
+  });
 }
