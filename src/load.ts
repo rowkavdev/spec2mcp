@@ -238,6 +238,41 @@ function hoistEscapedRefs(doc: OpenAPIV3.Document): void {
   apply(doc);
 }
 
+function resolveLocalPointer(root: Record<string, unknown>, ref: string): unknown {
+  if (!ref.startsWith('#/')) return undefined;
+  const decodeSegment = (segment: string): string => segment.replaceAll('~1', '/').replaceAll('~0', '~');
+  let target: unknown = root;
+  for (const segment of ref.slice(2).split('/').map(decodeSegment)) {
+    if (!target || typeof target !== 'object') return undefined;
+    target = (target as Record<string, unknown>)[segment];
+  }
+  return target;
+}
+
+/**
+ * Follow a path item alias chain to its final item. Returns the final target
+ * (undefined when the chain is cyclic or unresolvable) and the sibling fields
+ * collected along the way, with outer siblings winning.
+ */
+function followPathItemAliases(
+  root: Record<string, unknown>,
+  first: unknown,
+  ref: string,
+  outerSiblings: Record<string, unknown>,
+): { target: unknown; siblings: Record<string, unknown> } {
+  const visited = new Set<string>([ref]);
+  let target = first;
+  let siblings = outerSiblings;
+  while (target && typeof target === 'object' && typeof (target as Record<string, unknown>).$ref === 'string') {
+    const { $ref: aliasRef, ...aliasSiblings } = target as Record<string, unknown>;
+    siblings = { ...aliasSiblings, ...siblings };
+    if (visited.has(aliasRef as string)) return { target: undefined, siblings };
+    visited.add(aliasRef as string);
+    target = resolveLocalPointer(root, aliasRef as string);
+  }
+  return { target, siblings };
+}
+
 /**
  * Referenced Path Item Objects (#134). OpenAPI 3.1 allows a `paths` entry to
  * be a $ref into `components.pathItems`; neither the ID repair below nor
@@ -252,28 +287,21 @@ function inlinePathItemRefs(doc: OpenAPIV3.Document): void {
   const root = doc as unknown as Record<string, unknown>;
   const paths = root.paths as Record<string, unknown> | undefined;
   if (!paths || typeof paths !== 'object') return;
-  const decodeSegment = (segment: string): string => segment.replaceAll('~1', '/').replaceAll('~0', '~');
   for (const [path, pathItem] of Object.entries(paths)) {
     if (!pathItem || typeof pathItem !== 'object') continue;
-    const ref = (pathItem as Record<string, unknown>).$ref;
+    const { $ref: ref, ...outerSiblings } = pathItem as Record<string, unknown>;
     if (typeof ref !== 'string') continue;
-    let target: unknown;
-    if (ref.startsWith('#/')) {
-      target = root;
-      for (const segment of ref.slice(2).split('/').map(decodeSegment)) {
-        if (!target || typeof target !== 'object') {
-          target = undefined;
-          break;
-        }
-        target = (target as Record<string, unknown>)[segment];
-      }
-    }
-    if (!target || typeof target !== 'object') {
+    const first = resolveLocalPointer(root, ref);
+    if (!first || typeof first !== 'object') {
       console.error(`warning: cannot resolve referenced path item "${ref}" for path "${path}"; its operations will be missing.`);
       continue;
     }
-    const { $ref: _ref, ...siblings } = pathItem as Record<string, unknown>;
-    paths[path] = { ...structuredClone(target), ...siblings };
+    const { target, siblings } = followPathItemAliases(root, first, ref, outerSiblings);
+    if (!target || typeof target !== 'object') {
+      console.error(`warning: cannot resolve referenced path item alias chain for path "${path}"; its operations will be missing.`);
+      continue;
+    }
+    paths[path] = structuredClone({ ...target, ...siblings });
   }
 }
 
