@@ -394,6 +394,8 @@ function pathParameter(arg, value) {
   }
   if (value !== null && typeof value === 'object') {
     const entries = Object.entries(value);
+    const nested = entries.find(([, item]) => item !== null && typeof item === 'object');
+    if (nested) throw new ToolArgumentError(`Parameter "${arg.name}" has a nested object or array at "${nested[0]}", which its ${style} path style cannot express. Send a flat object.`);
     if (style === 'matrix') {
       const name = encode(arg.apiName ?? arg.name);
       return explode
