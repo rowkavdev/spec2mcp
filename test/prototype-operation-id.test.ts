@@ -13,3 +13,12 @@ for (const operationId of ['constructor', 'toString', '__proto__']) {
     assert.equal(buildManifest(doc).tools[0]!.operationId, operationId);
   });
 }
+
+test('verb-path lookup retains an operation named __proto__', async () => {
+  const doc = { openapi: '3.0.3', info: { title: 'Verb paths', version: '1' }, components: { schemas: {} },
+    paths: { '/prototype': { get: { operationId: '__proto__', responses: { '200': { description: 'ok' } } } } },
+  } as unknown as OpenAPIV3.Document;
+  const forge = await init(doc);
+  assert.equal(forge.getVerbPath('__proto__'), 'GET /prototype');
+  assert.equal(forge.getVerbPath('constructor'), undefined);
+});
