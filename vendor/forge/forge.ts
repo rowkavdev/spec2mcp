@@ -1,5 +1,5 @@
 import { lstat, mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { OpenAPIV3 } from 'openapi-types';
 import { matchResponseStatusKey, type ResponseInfo, resolveOperation } from './openapi-resolver.js';
 import type { Schema } from './schema/schema.js';
@@ -228,7 +228,8 @@ export class Forge {
       const fullPath = resolve(resolvedOutputDir, normalize(file.path));
 
       // Guard against path traversal — every output file must land inside outputDir
-      if (!fullPath.startsWith(resolvedOutputDir)) {
+      const within = relative(resolvedOutputDir, fullPath);
+      if (within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
         throw new Error(`Path traversal detected: "${file.path}" resolves outside output directory`);
       }
 
