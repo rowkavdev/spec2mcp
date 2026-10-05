@@ -1019,8 +1019,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
   const envPrefix = opts.envPrefix ?? toEnvPrefix(opts.serverName ?? apiTitle);
   const { auth, forOperation } = buildAuthPlan(doc, envPrefix);
 
-  const firstServer = doc.servers?.[0] ? serverUrl(doc.servers[0]) : '';
-  const baseUrl = opts.baseUrl ?? firstServer;
+  const baseUrl = opts.baseUrl ?? (doc.servers?.[0] ? serverUrl(doc.servers[0]) : '');
 
   const operationIds = getAllOperationIds();
   const warnings: string[] = [];
