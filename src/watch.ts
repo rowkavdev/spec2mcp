@@ -97,8 +97,17 @@ export async function watchSpec(
   if (isUrl) {
     pollTimer = setInterval(() => { void refresh(); }, interval);
   }
-  syncWatchers([]);
-  await refresh();
+  try {
+    syncWatchers([]);
+    await refresh();
+  } catch (error) {
+    closed = true;
+    clearTimeout(timer);
+    clearTimeout(retryTimer);
+    clearInterval(pollTimer);
+    for (const watcher of watchers) watcher.close();
+    throw error;
+  }
   log(`Watching ${input}${isUrl ? ` every ${interval / 1000}s` : ''} for changes (Ctrl+C to stop).`);
   return {
     close() {
