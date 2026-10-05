@@ -17,7 +17,7 @@ import { buildManifest, DEFAULT_31_DIALECT } from './manifest.js';
 import { createMcpTransformer } from './transformer.js';
 import { watchSpec } from './watch.js';
 import type { ManifestOptions } from './manifest.js';
-import { readProjectConfig, resolveConfig, type ProjectConfig } from './config.js';
+import { CONFIG_FILE, readProjectConfig, resolveConfig, type ProjectConfig } from './config.js';
 import { assertOutputDoesNotContainInputs } from './output-safety.js';
 
 const VERSION = '0.1.0';
@@ -181,7 +181,8 @@ async function main(): Promise<void> {
   }
   const spec = positionals[0];
   if (!spec) fail(`missing <spec> argument\n\n${HELP}`);
-  const { options, config } = resolveConfig(await readProjectConfig(values.config), { name: values.name, baseUrl: values['base-url'], envPrefix: values['env-prefix'], overlays: values.overlay, include: values.include, exclude: values.exclude });
+  const configPath = values.config ?? await access(CONFIG_FILE).then(() => CONFIG_FILE, () => undefined);
+  const { options, config } = resolveConfig(await readProjectConfig(configPath), { name: values.name, baseUrl: values['base-url'], envPrefix: values['env-prefix'], overlays: values.overlay, include: values.include, exclude: values.exclude });
   const flags = { out: values.out, name: options.serverName, baseUrl: options.baseUrl, envPrefix: options.envPrefix, transport: values.transport, port: values.port, include: options.include, exclude: options.exclude };
   if (flags.transport && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
   if (command !== 'serve' && (flags.transport || flags.port)) fail('--transport and --port are only valid with serve');
@@ -194,17 +195,17 @@ async function main(): Promise<void> {
   }
   if (values.watch && command === 'serve') fail('--watch is only supported by generate');
   if (values.watch) {
-    if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: values.config }]);
+    if (flags.out) await assertOutputDoesNotContainInputs(flags.out, [{ label: 'spec', path: spec }, ...((config.overlays ?? []).map((path) => ({ label: 'overlay', path }))), { label: 'config', path: configPath }]);
     const seconds = values['poll-interval'] === undefined ? 30 : Number(values['poll-interval']);
     // Node clamps timer delays above 2^31-1 ms to 1 ms, which would poll the URL continuously (#298).
     if (!Number.isFinite(seconds) || seconds < MIN_POLL_SECONDS || seconds > MAX_POLL_SECONDS) fail(`--poll-interval must be between ${MIN_POLL_SECONDS} and ${MAX_POLL_SECONDS} seconds`);
-    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, values.config), { pollIntervalMs: seconds * 1000, additionalInputs: config.overlays ?? [], discoverInputs: () => localRefDependencies(spec) });
+    const handle = await watchSpec(spec, () => cmdGenerate(spec, flags, config, configPath), { pollIntervalMs: seconds * 1000, additionalInputs: config.overlays ?? [], discoverInputs: () => localRefDependencies(spec) });
     process.once('SIGINT', () => { handle.close(); process.exit(0); });
     process.once('SIGTERM', () => { handle.close(); process.exit(0); });
   } else if (command === 'serve') {
     await cmdServe(spec, flags, config);
   } else {
-    await cmdGenerate(spec, flags, config, values.config);
+    await cmdGenerate(spec, flags, config, configPath);
   }
 }
 
