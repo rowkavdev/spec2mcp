@@ -160,7 +160,8 @@ const JSON_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', '
  * compositions from the loaded parameter schema when Forge narrows them. */
 function primitiveComposition(schema: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!schema) return undefined;
-  const keys = ['anyOf', 'oneOf'].filter(key => Array.isArray(schema[key]));
+  if (!Array.isArray(schema.anyOf) && !Array.isArray(schema.oneOf)) return undefined;
+  const keys = ['allOf', 'anyOf', 'oneOf'].filter(key => Array.isArray(schema[key]));
   if (keys.length === 0) return undefined;
   const compositions: Record<string, unknown> = {};
   for (const key of keys) {
@@ -169,16 +170,21 @@ function primitiveComposition(schema: Record<string, unknown> | undefined): Reco
     const mapped = branches.map((branch) => {
       const node = resolveDocRef(branch) as Record<string, unknown> | undefined;
       if (!node || typeof node.type !== 'string' || !['string', 'number', 'integer', 'boolean', 'null'].includes(node.type)) return undefined;
-      const { $ref: _ref, nullable: _nullable, xml: _xml, ...constraints } = node;
+      const { $ref: _ref, nullable: _nullable, xml: _xml, format: _format, ...constraints } = node;
+      if (key !== 'allOf' && _format !== undefined) constraints.format = _format;
       return constraints;
     });
     if (mapped.some((branch) => branch === undefined)) return undefined;
     compositions[key] = mapped;
   }
-  return {
+  const result = {
     ...(typeof schema.type === 'string' ? { type: schema.type } : {}),
     ...(Array.isArray(schema.enum) ? { enum: schema.enum } : {}),
     ...compositions,
+  };
+  return {
+    ...(schema.nullable === true ? { anyOf: [result, { type: 'null' }] } : result),
+    ...(schema.default !== undefined ? { default: schema.default } : {}),
   };
 }
 
