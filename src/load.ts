@@ -33,6 +33,8 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
     throw new Error('Input is not an OpenAPI or Swagger document (expected a JSON or YAML object).');
   }
 
+  rejectObjectCycles(raw);
+
   let convertedFromSwagger2 = false;
   if (!('openapi' in raw)) {
     if ((raw as Record<string, unknown>).swagger === '2.0') {
@@ -102,6 +104,37 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   return doc;
 }
 
+
+/** Reject YAML alias cycles before bundling and recursive normalization.
+ * Shared acyclic aliases are valid; only edges back into the active path fail.
+ * Use an explicit stack so detecting a deep graph does not itself overflow.
+ */
+function rejectObjectCycles(root: object): void {
+  type Frame = { value: object; path: string; entries: [string, unknown][]; index: number };
+  const active = new Map<object, string>();
+  const complete = new WeakSet<object>();
+  const frame = (value: object, path: string): Frame => ({ value, path, entries: Object.entries(value), index: 0 });
+  const stack = [frame(root, '')];
+  active.set(root, '');
+  while (stack.length) {
+    const current = stack[stack.length - 1]!;
+    if (current.index === current.entries.length) {
+      active.delete(current.value);
+      complete.add(current.value);
+      stack.pop();
+      continue;
+    }
+    const [key, child] = current.entries[current.index++]!;
+    if (!child || typeof child !== 'object') continue;
+    const path = `${current.path}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`;
+    if (active.has(child)) {
+      throw new Error(`Input contains a cyclic object graph: ${path} points back to ${active.get(child) || '/'}. Recursive YAML aliases are not supported; use $ref for recursive schemas.`);
+    }
+    if (complete.has(child)) continue;
+    active.set(child, path);
+    stack.push(frame(child, path));
+  }
+}
 
 /**
  * JSON Pointer escape normalization (#96). The vendored resolver walks
