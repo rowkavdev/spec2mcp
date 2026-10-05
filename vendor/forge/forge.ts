@@ -227,6 +227,9 @@ export class Forge {
 
       // Guard against path traversal — every output file must land inside outputDir
       const within = relative(resolvedOutputDir, fullPath);
+      if (within === '') {
+        throw new Error(`Invalid file path: "${file.path}" resolves to the output directory itself`);
+      }
       if (within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
         throw new Error(`Path traversal detected: "${file.path}" resolves outside output directory`);
       }

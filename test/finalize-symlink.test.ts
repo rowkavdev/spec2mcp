@@ -91,3 +91,18 @@ test('finalize validates output paths before cleaning existing files', async () 
     assert.equal(await readFile(existing, 'utf8'), 'keep');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('finalize rejects file paths resolving to the output root before cleaning', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-root-file-'));
+  try {
+    const forge = await init(DOC as never);
+    for (const path of ['', '.', 'sub/..']) {
+      const out = join(dir, 'out');
+      await mkdir(out, { recursive: true });
+      const existing = join(out, 'keep.txt');
+      await writeFile(existing, 'keep');
+      await assert.rejects(forge.finalize(out, [{ path, content: 'invalid file' }], { clean: true }), /file path.*output directory/i);
+      assert.equal(await readFile(existing, 'utf8'), 'keep');
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
