@@ -106,3 +106,19 @@ test('finalize rejects file paths resolving to the output root before cleaning',
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('finalize rejects conflicting file and directory paths before cleaning', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-conflicting-files-'));
+  try {
+    const forge = await init(DOC as never);
+    const out = join(dir, 'out');
+    await mkdir(out);
+    const existing = join(out, 'keep.txt');
+    await writeFile(existing, 'keep');
+    await assert.rejects(forge.finalize(out, [
+      { path: 'sub', content: 'a file' },
+      { path: 'sub/nested.txt', content: 'nested file' },
+    ], { clean: true }), /conflicting output paths/i);
+    assert.equal(await readFile(existing, 'utf8'), 'keep');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
