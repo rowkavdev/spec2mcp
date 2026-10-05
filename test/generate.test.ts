@@ -283,3 +283,15 @@ test('overlay reference protection uses the spec folder when the overlay lives e
     assert.equal(await readFile(dependency, 'utf8'), '{}');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('generation protects the implicitly loaded default config from overwrite', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-default-config-'));
+  try {
+    const config = join(dir, 'spec2mcp.config.json');
+    const original = JSON.stringify({ name: 'keep-my-settings', include: ['list*'] });
+    await writeFile(config, original);
+    await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', PETSTORE, '--out', dir], { cwd: dir }),
+      (error: unknown) => /output directory contains config input/i.test((error as { stderr: string }).stderr));
+    assert.equal(await readFile(config, 'utf8'), original);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
