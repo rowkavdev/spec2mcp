@@ -41,6 +41,7 @@ interface PathItem {
 }
 
 interface RequestBody {
+  required?: boolean;
   /** Reference to a `#/components/requestBodies/...` entry, if applicable. */
   $ref?: string;
   /** Human-readable description of the request body. */
@@ -647,6 +648,8 @@ export function normalizedRequestBody<T>(value: T): T {
 }
 
 function isSemanticallyEmptyRequestBody(requestBody: RequestBody): boolean {
+  // A required body still needs a wire representation even without constraints.
+  if (requestBody.required === true) return false;
   const content = requestBody.content;
   if (!content) return false;
   const mediaEntries = Object.entries(content);
