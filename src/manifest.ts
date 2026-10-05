@@ -171,7 +171,11 @@ function primitiveComposition(schema: Record<string, unknown> | undefined): Reco
     return constraints;
   });
   if (mapped.some((branch) => branch === undefined)) return undefined;
-  return { [key]: mapped };
+  return {
+    ...(typeof schema.type === 'string' ? { type: schema.type } : {}),
+    ...(Array.isArray(schema.enum) ? { enum: schema.enum } : {}),
+    [key]: mapped,
+  };
 }
 
 /**
