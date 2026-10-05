@@ -30,3 +30,16 @@ test('shared non-cyclic YAML aliases remain supported', async () => {
     assert.deepEqual(doc['x-second'], { value: 1 });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('cyclic YAML objects introduced by external refs are rejected after bundling', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'spec2mcp-external-yaml-cycle-'));
+  try {
+    const path = join(dir, 'spec.json');
+    await writeFile(join(dir, 'metadata.yaml'), 'value: &meta\n  self: *meta\n');
+    await writeFile(path, JSON.stringify({ openapi: '3.0.3', info: { title: 'External cycle', version: '1' }, paths: {},
+      'x-metadata': { $ref: './metadata.yaml#/value' },
+    }));
+    await assert.rejects(loadSpec(path), (error: unknown) => error instanceof Error && !(error instanceof RangeError) &&
+      /cyclic object graph/i.test(error.message) && error.message.includes('/x-metadata/self'));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

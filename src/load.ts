@@ -77,6 +77,9 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
       ? $RefParser.bundle(input as never, raw as never, bundleOptions)
       : $RefParser.bundle(input as never, bundleOptions))) as unknown as OpenAPIV3.Document;
 
+  // External YAML refs can introduce alias cycles not present in the root.
+  rejectObjectCycles(doc);
+
   // Forge's operation indexer requires paths and components.schemas to exist;
   // real-world specs often omit components, and a webhook-only 3.1 spec may
   // omit paths entirely.
