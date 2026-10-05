@@ -26,3 +26,19 @@ for (const location of ['path', 'query', 'header', 'cookie']) {
     assert.equal(validate({ ...args, [arg.name]: 'safe' }), false);
   });
 }
+
+for (const location of ['path', 'query', 'header', 'cookie']) {
+  test(`primitive ${location} parameters retain simultaneous anyOf and oneOf`, async () => {
+    const doc = { openapi: '3.1.0', info: { title: 'Intersections', version: '1' }, components: { schemas: {} },
+      paths: { [location === 'path' ? '/x/{v}' : '/x']: { get: { operationId: 'x', parameters: [{ name: 'v', in: location, required: true, schema: {
+        anyOf: [{ type: 'integer', minimum: 5 }], oneOf: [{ type: 'integer' }, { type: 'string' }],
+      } }], responses: { '200': { description: 'OK' } } } } },
+    } as unknown as OpenAPIV3.Document;
+    await init(doc);
+    const tool = buildManifest(doc).tools[0]!;
+    const validate = compileOutputValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
+    assert.equal(validate({ v: 5 }), true);
+    assert.equal(validate({ v: 4 }), false);
+    assert.equal(validate({ v: 'safe' }), false);
+  });
+}
