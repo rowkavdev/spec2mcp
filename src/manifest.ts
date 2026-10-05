@@ -1085,9 +1085,9 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     // invent an empty body: fall back to a required whole-body argument whose
     // dereferenced schema keeps the constraints. Root-level required
     // properties are left to the flattening path, which already requires them.
-    const emptyBodyFallback = bodyRequired && contentType === 'application/json' && (() => {
+    const emptyBodyFallback = bodyRequired && contentType !== undefined && isJsonMediaType(contentType) && (() => {
       const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
-      const schema = resolveDocRef(body?.content?.['application/json']?.schema) as Record<string, unknown> | undefined;
+      const schema = resolveDocRef(body?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
       if (schema?.type !== 'object') return false;
       if (Array.isArray(schema.required) && schema.required.length > 0) return false;
       return !emptyObjectSatisfies(schema);
@@ -1327,7 +1327,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     };
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
-    if (bodyRequired && (contentType === 'application/json' || contentType === 'multipart/form-data') &&
+    if (bodyRequired && contentType !== undefined && (isJsonMediaType(contentType) || contentType === 'multipart/form-data') &&
       !args.some((arg) => arg.location === 'body' && arg.required)) {
       const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const schema = resolveDocRef(requestBody?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
