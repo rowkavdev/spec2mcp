@@ -238,6 +238,18 @@ export class Forge {
       resolvedFiles.set(fullPath, file.content);
     }
 
+    // A file cannot also be an ancestor directory of another output file.
+    // Reject impossible layouts before cleaning or writing any output.
+    for (const fullPath of resolvedFiles.keys()) {
+      let parent = dirname(fullPath);
+      while (parent !== resolvedOutputDir) {
+        if (resolvedFiles.has(parent)) {
+          throw new Error(`Conflicting output paths: "${parent}" is both a file and a directory`);
+        }
+        parent = dirname(parent);
+      }
+    }
+
     if (options?.clean) {
       await rm(resolvedOutputDir, { recursive: true, force: true });
     }
