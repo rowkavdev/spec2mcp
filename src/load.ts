@@ -139,6 +139,46 @@ function rejectObjectCycles(root: object): void {
   }
 }
 
+type ReferenceContext = 'document' | 'components' | 'schema' | 'schemaMap' | 'other';
+const REFERENCE_LITERAL_KEYS = new Set(['const', 'enum', 'default', 'example', 'examples']);
+const REFERENCE_SCHEMA_MAP_KEYS = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas', 'dependencies']);
+const REFERENCE_SCHEMA_CHILD_KEYS = new Set(['items', 'additionalItems', 'prefixItems', 'additionalProperties', 'unevaluatedProperties', 'unevaluatedItems', 'contains', 'propertyNames', 'not', 'if', 'then', 'else', 'allOf', 'anyOf', 'oneOf', 'contentSchema']);
+
+function schemaReferenceContext(key: string): ReferenceContext | undefined {
+  if (REFERENCE_LITERAL_KEYS.has(key)) return undefined;
+  if (REFERENCE_SCHEMA_MAP_KEYS.has(key)) return 'schemaMap';
+  if (REFERENCE_SCHEMA_CHILD_KEYS.has(key)) return 'schema';
+  return 'other';
+}
+
+function childReferenceContext(context: ReferenceContext, key: string): ReferenceContext | undefined {
+  if (context === 'schemaMap') return 'schema';
+  if (key === '$ref') return undefined;
+  if (context === 'schema') return schemaReferenceContext(key);
+  if (context === 'document' && key === 'components') return 'components';
+  if (context === 'components' && key === 'schemas') return 'schemaMap';
+  return key === 'schema' ? 'schema' : 'other';
+}
+
+function visitReferenceObjects(node: unknown, context: ReferenceContext, visit: (node: Record<string, unknown>) => void): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) visitReferenceObjects(item, context, visit);
+    return;
+  }
+  const rec = node as Record<string, unknown>;
+  if (context !== 'schemaMap') visit(rec);
+  for (const [key, value] of Object.entries(rec)) {
+    const childContext = childReferenceContext(context, key);
+    if (childContext !== undefined) visitReferenceObjects(value, childContext, visit);
+  }
+}
+
+/** Visit reference-bearing objects without interpreting JSON Schema payload data. */
+function walkReferenceObjects(root: unknown, visit: (node: Record<string, unknown>) => void): void {
+  visitReferenceObjects(root, 'document', visit);
+}
+
 /**
  * JSON Pointer escape normalization (#96). The vendored resolver walks
  * `#/...` $ref segments literally - resolveDocRef never decodes `~1`/`~0` -
@@ -174,27 +214,16 @@ function sanitizeComponentKeys(doc: OpenAPIV3.Document): void {
     }
   }
   if (renames.size === 0) return;
-  const rewriteRefs = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) rewriteRefs(item);
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    const rec = node as Record<string, unknown>;
-    for (const [key, value] of Object.entries(rec)) {
-      if (key === '$ref' && typeof value === 'string') {
-        for (const [oldRef, newRef] of renames) {
-          if (value === oldRef || value.startsWith(`${oldRef}/`)) {
-            rec.$ref = newRef + value.slice(oldRef.length);
-            break;
-          }
-        }
-      } else {
-        rewriteRefs(value);
+  walkReferenceObjects(doc, rec => {
+    const value = rec.$ref;
+    if (typeof value !== 'string') return;
+    for (const [oldRef, newRef] of renames) {
+      if (value === oldRef || value.startsWith(`${oldRef}/`)) {
+        rec.$ref = newRef + value.slice(oldRef.length);
+        break;
       }
     }
-  };
-  rewriteRefs(doc);
+  });
 }
 
 
@@ -228,50 +257,28 @@ function hoistEscapedRefs(doc: OpenAPIV3.Document): void {
   // Pass 1: collect escaped refs and their synthetic names. Object key
   // order makes the walk - and therefore the generated names - deterministic.
   const rewrites = new Map<string, string>();
-  const collect = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) collect(item);
-      return;
+  walkReferenceObjects(doc, rec => {
+    const value = rec.$ref;
+    if (typeof value !== 'string' || !value.includes('~') || rewrites.has(value)) return;
+    const target = resolvePointer(value);
+    if (target && typeof target === 'object') {
+      const tail = decodeSegment(value.split('/').pop() ?? 'ref').replace(/[^A-Za-z0-9_-]+/g, '_') || 'ref';
+      let name = `Hoisted_${tail}`;
+      let n = 2;
+      while (name in schemas) name = `Hoisted_${tail}_${n++}`;
+      schemas[name] = target;
+      rewrites.set(value, `#/components/schemas/${name}`);
     }
-    if (!node || typeof node !== 'object') return;
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      if (key === '$ref' && typeof value === 'string' && value.includes('~') && !rewrites.has(value)) {
-        const target = resolvePointer(value);
-        if (target && typeof target === 'object') {
-          const tail = decodeSegment(value.split('/').pop() ?? 'ref').replace(/[^A-Za-z0-9_-]+/g, '_') || 'ref';
-          let name = `Hoisted_${tail}`;
-          let n = 2;
-          while (name in schemas) name = `Hoisted_${tail}_${n++}`;
-          schemas[name] = target;
-          rewrites.set(value, `#/components/schemas/${name}`);
-        }
-      } else {
-        collect(value);
-      }
-    }
-  };
-  collect(doc);
+  });
   if (rewrites.size === 0) return;
 
   // Pass 2: rewrite. Runs after the hoist, so synthetic components are not
   // re-collected; refs inside them were already collected in pass 1.
-  const apply = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) apply(item);
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    const rec = node as Record<string, unknown>;
-    for (const [key, value] of Object.entries(rec)) {
-      if (key === '$ref' && typeof value === 'string') {
-        const replacement = rewrites.get(value);
-        if (replacement) rec.$ref = replacement;
-      } else {
-        apply(value);
-      }
-    }
-  };
-  apply(doc);
+  walkReferenceObjects(doc, rec => {
+    if (typeof rec.$ref !== 'string') return;
+    const replacement = rewrites.get(rec.$ref);
+    if (replacement) rec.$ref = replacement;
+  });
 }
 
 function resolveLocalPointer(root: Record<string, unknown>, ref: string): unknown {
@@ -372,18 +379,9 @@ function breakAliasCycles(doc: OpenAPIV3.Document): void {
 
   // Collect every internal $ref in the document.
   const refs = new Set<string>();
-  const collect = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) collect(item);
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      if (key === '$ref' && typeof value === 'string' && value.startsWith('#/')) refs.add(value);
-      else collect(value);
-    }
-  };
-  collect(root);
+  walkReferenceObjects(root, rec => {
+    if (typeof rec.$ref === 'string' && rec.$ref.startsWith('#/')) refs.add(rec.$ref);
+  });
 
   const broken = new Set<string>();
   for (const ref of refs) {
@@ -409,22 +407,12 @@ function breakAliasCycles(doc: OpenAPIV3.Document): void {
   for (const ref of broken) {
     console.error(`warning: reference alias cycle involving "${ref}" never reaches a concrete schema; treating it as unresolvable.`);
   }
-  const rewrite = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) rewrite(item);
-      return;
+  walkReferenceObjects(root, rec => {
+    const value = rec.$ref;
+    if (typeof value === 'string' && broken.has(value)) {
+      rec.$ref = `#/invalid-alias-cycle/${value.split('/').pop()}`;
     }
-    if (!node || typeof node !== 'object') return;
-    const rec = node as Record<string, unknown>;
-    for (const [key, value] of Object.entries(rec)) {
-      if (key === '$ref' && typeof value === 'string' && broken.has(value)) {
-        rec.$ref = `#/invalid-alias-cycle/${value.split('/').pop()}`;
-      } else {
-        rewrite(value);
-      }
-    }
-  };
-  rewrite(root);
+  });
 }
 
 const JSON_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object', 'null']);
