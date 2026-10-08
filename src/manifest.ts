@@ -172,6 +172,7 @@ function primitiveComposition(schema: Record<string, unknown> | undefined): Reco
       if (!node || typeof node.type !== 'string' || !['string', 'number', 'integer', 'boolean', 'null'].includes(node.type)) return undefined;
       const { $ref: _ref, nullable: _nullable, xml: _xml, format: _format, ...constraints } = node;
       if (key !== 'allOf' && _format !== undefined) constraints.format = _format;
+      if (_nullable === true && constraints.type !== 'null') constraints.type = [constraints.type, 'null'];
       return constraints;
     });
     if (mapped.some((branch) => branch === undefined)) return undefined;
