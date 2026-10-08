@@ -5,7 +5,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
-import $RefParser from '@apidevtools/json-schema-ref-parser';
+import $RefParser, { getJsonSchemaRefParserDefaultOptions, type FileInfo, type Plugin } from '@apidevtools/json-schema-ref-parser';
 import { convert as convertSwagger2 } from 'swagger2openapi';
 import type { OpenAPIV3 } from 'openapi-types';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
@@ -46,9 +46,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
       // Servers come from host/basePath/schemes and securityDefinitions
       // become components.securitySchemes, so auth and base URL handling
       // are unchanged.
-      const bundled2 = await $RefParser.bundle(input, raw as never, {
-        dereference: { circular: 'ignore' },
-      });
+      const bundled2 = await withProtectedReferences(raw, options => $RefParser.bundle(input, raw as never, options));
       const { openapi } = await convertSwagger2(bundled2 as never, { patch: true, warnOnly: true } as never);
       raw = openapi;
       convertedFromSwagger2 = true;
@@ -69,13 +67,9 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   // kept as the base for relative refs. Handing the bare URL to the parser
   // would make it fetch the root again through its safe-URL resolver, which
   // rejects loopback and private hosts and broke local dev specs (#168).
-  const isUrl = /^https?:\/\//i.test(input);
-  const bundleOptions = { dereference: { circular: 'ignore' } } as never;
-  const doc = (await (convertedFromSwagger2
+  const doc = (await withProtectedReferences(raw, bundleOptions => (convertedFromSwagger2
     ? $RefParser.bundle(raw as never, bundleOptions)
-    : isUrl
-      ? $RefParser.bundle(input as never, raw as never, bundleOptions)
-      : $RefParser.bundle(input as never, bundleOptions))) as unknown as OpenAPIV3.Document;
+    : $RefParser.bundle(input as never, raw as never, bundleOptions)))) as unknown as OpenAPIV3.Document;
 
   // External YAML refs can introduce alias cycles not present in the root.
   rejectObjectCycles(doc);
@@ -155,6 +149,7 @@ function childReferenceContext(context: ReferenceContext, key: string): Referenc
   if (context === 'schemaMap') return 'schema';
   if (key === '$ref') return undefined;
   if (context === 'schema') return schemaReferenceContext(key);
+  if (context === 'document' && key === 'definitions') return 'schemaMap';
   if (context === 'document' && key === 'components') return 'components';
   if (context === 'components' && key === 'schemas') return 'schemaMap';
   return key === 'schema' ? 'schema' : 'other';
@@ -177,6 +172,82 @@ function visitReferenceObjects(node: unknown, context: ReferenceContext, visit: 
 /** Visit reference-bearing objects without interpreting JSON Schema payload data. */
 function walkReferenceObjects(root: unknown, visit: (node: Record<string, unknown>) => void): void {
   visitReferenceObjects(root, 'document', visit);
+}
+
+type ReferenceProtection = { restore: (() => void)[]; literals: WeakSet<object> };
+
+/** Hide literal $ref keys before RefParser sees either root or external data. */
+function protectLiteralReferences(root: unknown, context: ReferenceContext, protection: ReferenceProtection, seen = new WeakSet<object>()): void {
+  if (!root || typeof root !== 'object' || seen.has(root)) return;
+  seen.add(root);
+  if (Array.isArray(root)) {
+    for (const child of root) protectLiteralReferences(child, context, protection, seen);
+    return;
+  }
+  for (const [key, value] of Object.entries(root)) {
+    const childContext = childReferenceContext(context, key);
+    if (childContext !== undefined) protectLiteralReferences(value, childContext, protection, seen);
+    else if (key !== '$ref') isolateLiteralPayload(root as Record<string, unknown>, key, value, protection);
+  }
+}
+
+function isolateLiteralPayload(parent: Record<string, unknown>, key: string, value: unknown, protection: ReferenceProtection): void {
+  // YAML aliases can also occur as real schemas. Protect a private data copy.
+  if (value && typeof value === 'object' && protection.literals.has(value)) return;
+  const literal = structuredClone(value);
+  if (literal && typeof literal === 'object') protection.literals.add(literal);
+  parent[key] = literal;
+  hideLiteralReferenceKeys(literal, protection);
+}
+
+function hideLiteralReferenceKeys(root: unknown, protection: ReferenceProtection, seen = new WeakSet<object>()): void {
+  if (!root || typeof root !== 'object' || seen.has(root)) return;
+  seen.add(root);
+  const rec = root as Record<string, unknown>;
+  if (Object.hasOwn(rec, '$ref')) {
+    const value = rec.$ref;
+    delete rec.$ref;
+    protection.restore.push(() => { rec.$ref = value; });
+  }
+  for (const value of Object.values(rec)) hideLiteralReferenceKeys(value, protection, seen);
+}
+
+function protectedParser(plugin: Plugin, protection: ReferenceProtection): Plugin {
+  const parse = plugin.parse as (file: FileInfo) => unknown | Promise<unknown>;
+  return { ...plugin, async parse(file: FileInfo) {
+    const value = await parse.call(plugin, file);
+    const rec = value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+    const context = rec && ('openapi' in rec || 'swagger' in rec) ? 'document' : 'schema';
+    protectLiteralReferences(value, context, protection);
+    // A fragment may select a schema from an otherwise untyped external map.
+    if (file.hash.startsWith('#/')) {
+      let target: unknown = value;
+      for (const segment of file.hash.slice(2).split('/')) {
+        const key = decodeURIComponent(segment).replaceAll('~1', '/').replaceAll('~0', '~');
+        target = target && typeof target === 'object' ? (target as Record<string, unknown>)[key] : undefined;
+      }
+      protectLiteralReferences(target, 'schema', protection);
+    }
+    return value;
+  } };
+}
+
+async function withProtectedReferences<T>(root: unknown, run: (options: ReturnType<typeof referenceParserOptions>) => Promise<T>): Promise<T> {
+  const protection: ReferenceProtection = { restore: [], literals: new WeakSet() };
+  protectLiteralReferences(root, 'document', protection);
+  try { return await run(referenceParserOptions(protection)); }
+  finally { for (const restoreKey of protection.restore) restoreKey(); }
+}
+
+function referenceParserOptions(protection: ReferenceProtection) {
+  const defaults = getJsonSchemaRefParserDefaultOptions();
+  return {
+    dereference: { circular: 'ignore' as const },
+    parse: {
+      json: protectedParser(defaults.parse.json as Plugin, protection),
+      yaml: protectedParser(defaults.parse.yaml as Plugin, protection),
+    },
+  };
 }
 
 /**
@@ -567,7 +638,10 @@ function synthesizeId(method: string, path: string): string {
  */
 export async function localRefDependencies(input: string): Promise<string[]> {
   if (/^https?:\/\//i.test(input)) return [];
-  const refs = await $RefParser.resolve(input) as unknown as { paths(...types: string[]): string[] };
+  const text = await readFile(input, 'utf8');
+  const raw = parseYaml(text);
+  rejectObjectCycles(raw);
+  const refs = await withProtectedReferences(raw, options => $RefParser.resolve(input, raw, options)) as unknown as { paths(...types: string[]): string[] };
   const root = resolvePath(input);
   return refs.paths('file').map((file: string) => resolvePath(file)).filter((file: string) => file !== root);
 }
