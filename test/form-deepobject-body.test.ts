@@ -61,7 +61,7 @@ before(async () => {
       requestBody: { content: { 'application/x-www-form-urlencoded': {
         schema: { type: 'object', properties: {
           email: { type: 'string' },
-          metadata: { type: 'object', additionalProperties: { type: 'string' } },
+          metadata: { type: 'object', additionalProperties: nullable({ type: 'string' }) },
           address: { type: 'object', properties: { city: { type: 'string' }, line1: { type: 'string' } } },
           expand: { type: 'array', items: { type: 'string' } },
           items: { type: 'array', items: { type: 'object', properties: { price: { type: 'string' }, quantity: { type: 'integer' } } } },

@@ -1234,10 +1234,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         args.push(arg);
       }
     } else if (op.hasRequestBody) {
-      // A primitive JSON root is a raw body, but its source constraints still
-      // govern the tool argument. Non-JSON/free-form bodies retain the old view.
+      // Raw JSON and form bodies still use their declared source constraints.
+      // Other free-form media retain the old view.
       let rawSchema: Record<string, unknown> | undefined;
-      if (contentType && isJsonMediaType(contentType)) {
+      if (contentType && (isJsonMediaType(contentType) || contentType === 'application/x-www-form-urlencoded')) {
         const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
         const node = body?.content?.[contentType]?.schema;
         if (node && typeof node === 'object') {
@@ -1246,10 +1246,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
             const schema = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }, 0,
               () => { unresolved = true; }, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
             if (!unresolved) rawSchema = schema;
-            else warnings.push(`${toolName}: raw JSON body schema has an unresolved reference; using an unconstrained body argument`);
+            else warnings.push(`${toolName}: raw body schema has an unresolved reference; using an unconstrained body argument`);
           } catch (error) {
             if (!(error instanceof SchemaTooLarge)) throw error;
-            warnings.push(`${toolName}: raw JSON body schema exceeds the input budget; using an unconstrained body argument`);
+            warnings.push(`${toolName}: raw body schema exceeds the input budget; using an unconstrained body argument`);
           }
         }
       }
