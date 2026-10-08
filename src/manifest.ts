@@ -362,7 +362,7 @@ function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
   if (composition) return applySourceConstraints(composition, items);
   const type = typeof items?.type === 'string' && JSON_TYPES.has(items.type) && items.type !== 'array' ? items.type : 'string';
   const schema: Record<string, unknown> = { type };
-  if (Array.isArray(items?.enum)) schema.enum = items.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
+  if (Array.isArray(items?.enum)) schema.enum = items.enum.filter((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v));
   return schema;
 }
 
@@ -379,7 +379,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
   const composition = primitiveComposition(resolved);
   if (composition) return applySourceConstraints({
     ...composition,
-    ...(Array.isArray(resolved?.enum) ? { enum: resolved.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v)) } : {}),
+    ...(Array.isArray(resolved?.enum) ? { enum: resolved.enum.filter((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v)) } : {}),
     ...(resolved?.default !== undefined ? { default: resolved.default } : {}),
     ...(param.description ? { description: param.description } : {}),
   }, resolved);
@@ -391,7 +391,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
   }
   schema.type = type;
   if (type === 'array') schema.items = cookieArrayItemSchema(resolved?.items);
-  if (Array.isArray(resolved?.enum)) schema.enum = resolved.enum.filter((v) => ['string', 'number', 'boolean'].includes(typeof v));
+  if (Array.isArray(resolved?.enum)) schema.enum = resolved.enum.filter((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v));
   if (resolved?.default !== undefined) schema.default = resolved.default;
   const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
   if (description) schema.description = description;
