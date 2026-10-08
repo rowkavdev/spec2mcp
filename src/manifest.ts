@@ -1161,6 +1161,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         // null, so wrap the adapted view rather than loosening `required`.
         const source = bodySchemaAtPath(doc, op, p.apiFieldPath);
         const leafSchema = applySourceConstraints(restoreIntegerType(argSchema(p), source), source);
+        // Outer nullability is wrapped below; restore only item nullability here.
+        restoreNullable(leafSchema, { items: source?.items });
         const schema = bodyPropertyNullable(doc, op, p.apiFieldPath)
           ? { anyOf: [leafSchema, { type: 'null' }] }
           : leafSchema;
