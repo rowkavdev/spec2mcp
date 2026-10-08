@@ -507,7 +507,7 @@ function pinBodyDiscriminator(source: unknown, schema: Record<string, unknown>):
 }
 
 function hasBodyAlternatives(schema: Record<string, unknown>): boolean {
-  return Array.isArray(schema.oneOf);
+  return Array.isArray(schema.oneOf) || Array.isArray(schema.anyOf);
 }
 
 /** A required JSON property with no writable tool path must not disappear

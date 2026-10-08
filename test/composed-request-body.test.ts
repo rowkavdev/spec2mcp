@@ -89,3 +89,20 @@ test('a required __proto__ discriminator rejects a missing own field', async () 
   assert.equal(validate({ body: { meow: true } }), false);
   assert.equal(validate({ body: JSON.parse('{"__proto__":"Cat","meow":true}') }), true);
 });
+
+test('an anyOf body with root required fields is not flattened past its branch constraints', async () => {
+  const doc = { openapi: '3.1.0', info: { title: 'AnyOf with root fields', version: '1' }, components: { schemas: {} }, paths: {
+    '/': { post: { operationId: 'post', requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', properties: { mode: { type: 'string' } }, required: ['mode'],
+      anyOf: [{ properties: { mode: { const: 'a' } } }, { properties: { mode: { const: 'b' } } }],
+    } } } }, responses: { '200': { description: 'ok' } } } },
+  } } as unknown as OpenAPIV3.Document;
+  await init(doc);
+  const tool = buildManifest(doc).tools[0]!;
+  assert.deepEqual(tool.args.map(arg => arg.name), ['body']);
+  const validate = compileOutputValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
+  assert.equal(validate({ body: { mode: 'a' } }), true);
+  assert.equal(validate({ body: { mode: 'b' } }), true);
+  assert.equal(validate({ body: { mode: 'wrong' } }), false);
+  assert.equal(validate({ body: {} }), false);
+});
