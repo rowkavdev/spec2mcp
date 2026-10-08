@@ -52,7 +52,8 @@ async function readBoundedBody(response) {
       if (done) break;
       length += value.byteLength;
       if (length > MAX_RESPONSE_BYTES) {
-        await reader.cancel().catch(() => {});
+        // Cleanup must not delay or replace the byte-limit error.
+        try { void Promise.resolve(reader.cancel()).catch(() => {}); } catch {}
         throw new ResponseBodyLimitError(`Response body exceeds the ${MAX_RESPONSE_BYTES} byte limit. Set SPEC2MCP_MAX_RESPONSE_BYTES to raise it.`);
       }
       chunks.push(Buffer.from(value));
