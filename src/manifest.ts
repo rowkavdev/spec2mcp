@@ -1157,7 +1157,8 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         const required = bodyRequired && p.required && rootRequired.has(p.apiFieldPath[0] ?? '');
         // Nullable is not optional (#81): a required property may still be
         // null, so wrap the adapted view rather than loosening `required`.
-        const leafSchema = restoreIntegerType(argSchema(p), bodySchemaAtPath(doc, op, p.apiFieldPath));
+        const source = bodySchemaAtPath(doc, op, p.apiFieldPath);
+        const leafSchema = applySourceConstraints(restoreIntegerType(argSchema(p), source), source);
         const schema = bodyPropertyNullable(doc, op, p.apiFieldPath)
           ? { anyOf: [leafSchema, { type: 'null' }] }
           : leafSchema;
