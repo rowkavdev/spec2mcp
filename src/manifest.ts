@@ -270,7 +270,8 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
     if (itemComposition) {
       // Same for an items composition: the items' own constraints and the
       // outer array constraints both survive (review on #151).
-      return applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
+      const schema = applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
+      return location === 'path' ? schema : restoreNullable(schema, resolved);
     }
   }
   if ((resolved?.type === 'object' || (resolved?.type === undefined && p.type === 'object')) && location !== 'path') {
