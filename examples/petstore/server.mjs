@@ -720,6 +720,9 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
   }
 
   if (res.status >= 300 && res.status < 400) {
+    // No caller will read a rejected redirect body. Request cancellation, but
+    // do not wait: a broken cleanup must not delay or mask the redirect error.
+    try { void res.body?.cancel().catch(() => {}); } catch {}
     return errorResult(`HTTP ${res.status} redirect not followed to protect request credentials and body.`);
   }
 
