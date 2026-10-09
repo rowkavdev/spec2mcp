@@ -1,6 +1,6 @@
 /** Regenerate a project when its source spec changes. */
 import { watch as watchDirectory, type FSWatcher } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -45,7 +45,7 @@ export async function watchSpec(
     const dependencies = [...new Set(discovered.map(file => resolve(file)))]
       .filter(file => !additionalInputs.includes(file) && (isUrl || file !== resolve(input)))
       .sort();
-    syncWatchers(dependencies);
+    await syncWatchers(dependencies);
     for (const file of [...additionalInputs, ...dependencies]) {
       const extra = await readFile(file).catch((err: NodeJS.ErrnoException) => { if (dependencies.includes(file) && err.code === 'ENOENT') return Buffer.alloc(0); throw err; });
       hash.update(JSON.stringify([file, extra.length]));
@@ -54,12 +54,21 @@ export async function watchSpec(
     return hash.digest('hex');
   }
 
-  function syncWatchers(dependencies: string[]): void {
+  async function syncWatchers(dependencies: string[]): Promise<void> {
     if (closed) return;
     const files = [...new Set([...(isUrl ? [] : [resolve(input)]), ...additionalInputs, ...dependencies])];
-    const key = files.join('\0');
+    // Directory watching sees changes to a symlink, not writes to its target.
+    // Keep both paths so retargeting the link and editing the current target
+    // are observed, including atomic replacement of either file.
+    const targets = await Promise.all(files.map(file => realpath(file).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return file;
+      throw err;
+    })));
+    if (closed) return;
+    const watchedFiles = [...new Set([...files, ...targets])];
+    const key = watchedFiles.join('\0');
     if (key === watchedKey) return;
-    const nextWatchers = watchLocalInputs(files, () => {
+    const nextWatchers = watchLocalInputs(watchedFiles, () => {
       clearTimeout(timer);
       timer = setTimeout(() => { void refresh(); }, 100);
     }, log);
@@ -98,7 +107,7 @@ export async function watchSpec(
     pollTimer = setInterval(() => { void refresh(); }, interval);
   }
   try {
-    syncWatchers([]);
+    await syncWatchers([]);
     await refresh();
   } catch (error) {
     closed = true;
