@@ -1,6 +1,6 @@
 /** Guard source inputs from being mixed into the generated output directory. */
 import { realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 const isUrl = (value: string): boolean => /^https?:\/\//i.test(value);
 
@@ -21,13 +21,22 @@ async function canonicalPath(path: string): Promise<string> {
   }
 }
 
+function containsPath(output: string, input: string): boolean {
+  const within = relative(output, input);
+  return within === '' || (within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within));
+}
+
 export async function assertOutputDoesNotContainInputs(outDir: string, inputs: { label: string; path?: string }[]): Promise<void> {
   const output = await canonicalPath(outDir);
   for (const { label, path } of inputs) {
     if (!path || isUrl(path)) continue;
     const input = await canonicalPath(path);
-    const within = relative(output, input);
-    if (within === '' || (within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within))) {
+    // Finalize replaces the input's directory entry even when it is a link
+    // to a file outside output. Resolve the parent without following that
+    // final link so both the source entry and its target stay protected.
+    const absolute = resolve(path);
+    const entry = join(await canonicalPath(dirname(absolute)), basename(absolute));
+    if (containsPath(output, input) || containsPath(output, entry)) {
       throw new Error(`Output directory contains ${label} input (${path}); choose an output directory outside its source inputs.`);
     }
   }
