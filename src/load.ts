@@ -14,19 +14,17 @@ import type { ApiOverlay, ApiOverlayFile } from '../vendor/forge/index.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 
+async function readSpecText(input: string): Promise<{ text: string; referenceBase: string }> {
+  if (!/^https?:\/\//i.test(input)) return { text: await readFile(input, 'utf8'), referenceBase: input };
+  const res = await fetch(input);
+  if (!res.ok) throw new Error(`Failed to fetch spec: HTTP ${res.status} from ${input}`);
+  // Relative references belong to the document actually returned, which may
+  // be in another directory or host after an HTTP redirect.
+  return { text: await res.text(), referenceBase: res.url || input };
+}
+
 export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
-  let text: string;
-  let referenceBase = input;
-  if (/^https?:\/\//i.test(input)) {
-    const res = await fetch(input);
-    if (!res.ok) throw new Error(`Failed to fetch spec: HTTP ${res.status} from ${input}`);
-    text = await res.text();
-    // Relative references belong to the document actually returned, which may
-    // be in another directory or host after an HTTP redirect.
-    referenceBase = res.url || input;
-  } else {
-    text = await readFile(input, 'utf8');
-  }
+  const { text, referenceBase } = await readSpecText(input);
 
   let raw: unknown;
   try {
