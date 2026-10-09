@@ -525,7 +525,7 @@ function isJsonSchemaTypeArray(value: unknown): value is string[] {
 }
 
 function collapseSchemaChildren(key: string, value: unknown): void {
-  if (['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'].includes(key) && value && typeof value === 'object') {
+  if (['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas', 'dependencies'].includes(key) && value && typeof value === 'object') {
     for (const schema of Object.values(value)) collapseTypeArrays(schema);
   } else {
     collapseTypeArrays(value);
