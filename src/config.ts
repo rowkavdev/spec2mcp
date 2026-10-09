@@ -5,14 +5,19 @@ import type { ManifestOptions } from './manifest.js';
 export const CONFIG_FILE = 'spec2mcp.config.json';
 export type ProjectConfig = { name?: string; baseUrl?: string; envPrefix?: string; overlays?: string[]; include?: string[]; exclude?: string[] };
 
-export async function readProjectConfig(path = CONFIG_FILE): Promise<ProjectConfig> {
-  let text: string;
+async function readConfigText(path: string, optional: boolean): Promise<string | undefined> {
   try {
-    text = await readFile(resolve(path), 'utf8');
+    return await readFile(resolve(path), 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && path === CONFIG_FILE) return {};
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && optional) return undefined;
     throw error;
   }
+}
+
+export async function readProjectConfig(path?: string): Promise<ProjectConfig> {
+  const text = await readConfigText(path ?? CONFIG_FILE, path === undefined);
+  if (text === undefined) return {};
+  path ??= CONFIG_FILE;
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
