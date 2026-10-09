@@ -184,9 +184,11 @@ async function main(): Promise<void> {
   const configPath = values.config ?? await access(CONFIG_FILE).then(() => CONFIG_FILE, () => undefined);
   const { options, config } = resolveConfig(await readProjectConfig(configPath), { name: values.name, baseUrl: values['base-url'], envPrefix: values['env-prefix'], overlays: values.overlay, include: values.include, exclude: values.exclude });
   const flags = { out: values.out, name: options.serverName, baseUrl: options.baseUrl, envPrefix: options.envPrefix, transport: values.transport, port: values.port, include: options.include, exclude: options.exclude };
-  if (flags.transport && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
-  if (command !== 'serve' && (flags.transport || flags.port)) fail('--transport and --port are only valid with serve');
-  if (flags.port && (flags.transport !== 'http' || !/^(0|[1-9][0-9]*)$/.test(flags.port) || Number(flags.port) > 65535)) {
+  // Explicitly empty values are not absent flags: an empty --port used to fall
+  // through to Number('') === 0 and bind a random port instead of failing.
+  if (flags.transport !== undefined && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
+  if (command !== 'serve' && (flags.transport !== undefined || flags.port !== undefined)) fail('--transport and --port are only valid with serve');
+  if (flags.port !== undefined && (flags.transport !== 'http' || !/^(0|[1-9][0-9]*)$/.test(flags.port) || Number(flags.port) > 65535)) {
     fail('--port requires --transport http and an integer between 0 and 65535');
   }
 
