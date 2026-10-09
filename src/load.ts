@@ -214,12 +214,22 @@ function hideLiteralReferenceKeys(root: unknown, protection: ReferenceProtection
   for (const value of Object.values(rec)) hideLiteralReferenceKeys(value, protection, seen);
 }
 
+function externalReferenceContext(value: unknown): ReferenceContext {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'schema';
+  const rec = value as Record<string, unknown>;
+  if ('openapi' in rec || 'swagger' in rec) return 'document';
+  const schemaKeys = ['type', '$ref', '$schema', '$id', ...REFERENCE_SCHEMA_MAP_KEYS, ...REFERENCE_SCHEMA_CHILD_KEYS, ...REFERENCE_LITERAL_KEYS];
+  if (schemaKeys.some(key => Object.hasOwn(rec, key))) return 'schema';
+  // Plain external schema maps have no root schema keywords. Each entry can
+  // be selected by a separate fragment, but the parser loads the file once.
+  return 'schemaMap';
+}
+
 function protectedParser(plugin: Plugin, protection: ReferenceProtection): Plugin {
   const parse = plugin.parse as (file: FileInfo) => unknown | Promise<unknown>;
   return { ...plugin, async parse(file: FileInfo) {
     const value = await parse.call(plugin, file);
-    const rec = value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
-    const context = rec && ('openapi' in rec || 'swagger' in rec) ? 'document' : 'schema';
+    const context = externalReferenceContext(value);
     protectLiteralReferences(value, context, protection);
     // A fragment may select a schema from an otherwise untyped external map.
     if (file.hash.startsWith('#/')) {
