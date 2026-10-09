@@ -4,6 +4,7 @@
  * reaches the Forge pipeline.
  */
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import $RefParser, { getJsonSchemaRefParserDefaultOptions, type FileInfo, type Plugin } from '@apidevtools/json-schema-ref-parser';
 import { convert as convertSwagger2 } from 'swagger2openapi';
@@ -174,7 +175,7 @@ function walkReferenceObjects(root: unknown, visit: (node: Record<string, unknow
   visitReferenceObjects(root, 'document', visit);
 }
 
-type ReferenceProtection = { restore: (() => void)[]; literals: WeakSet<object> };
+type ReferenceProtection = { restore: (() => void)[]; literals: WeakSet<object>; marker: string };
 
 /** Hide literal $ref keys before RefParser sees either root or external data. */
 function protectLiteralReferences(root: unknown, context: ReferenceContext, protection: ReferenceProtection, seen = new WeakSet<object>()): void {
@@ -207,7 +208,8 @@ function hideLiteralReferenceKeys(root: unknown, protection: ReferenceProtection
   if (Object.hasOwn(rec, '$ref')) {
     const value = rec.$ref;
     delete rec.$ref;
-    protection.restore.push(() => { rec.$ref = value; });
+    rec[protection.marker] = value;
+    protection.restore.push(() => { delete rec[protection.marker]; rec.$ref = value; });
   }
   for (const value of Object.values(rec)) hideLiteralReferenceKeys(value, protection, seen);
 }
@@ -233,10 +235,30 @@ function protectedParser(plugin: Plugin, protection: ReferenceProtection): Plugi
 }
 
 async function withProtectedReferences<T>(root: unknown, run: (options: ReturnType<typeof referenceParserOptions>) => Promise<T>): Promise<T> {
-  const protection: ReferenceProtection = { restore: [], literals: new WeakSet() };
+  const protection: ReferenceProtection = { restore: [], literals: new WeakSet(), marker: `x-spec2mcp-literal-${randomUUID()}` };
   protectLiteralReferences(root, 'document', protection);
-  try { return await run(referenceParserOptions(protection)); }
+  try {
+    const result = await run(referenceParserOptions(protection));
+    restoreCopiedLiteralReferences(result, protection.marker);
+    return result;
+  }
   finally { for (const restoreKey of protection.restore) restoreKey(); }
+}
+
+function restoreCopiedLiteralReferences(root: unknown, marker: string): void {
+  const seen = new WeakSet<object>();
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+    const rec = node as Record<string, unknown>;
+    if (Object.hasOwn(rec, marker)) {
+      rec.$ref = rec[marker];
+      delete rec[marker];
+    }
+    for (const value of Object.values(rec)) stack.push(value);
+  }
 }
 
 function referenceParserOptions(protection: ReferenceProtection) {
