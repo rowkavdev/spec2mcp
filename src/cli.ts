@@ -181,6 +181,7 @@ async function main(): Promise<void> {
   }
   const spec = positionals[0];
   if (!spec) fail(`missing <spec> argument\n\n${HELP}`);
+  if (positionals.length !== 1) fail('expected exactly one <spec> argument');
   const configPath = values.config ?? await access(CONFIG_FILE).then(() => CONFIG_FILE, () => undefined);
   const { options, config } = resolveConfig(await readProjectConfig(configPath), { name: values.name, baseUrl: values['base-url'], envPrefix: values['env-prefix'], overlays: values.overlay, include: values.include, exclude: values.exclude });
   const flags = { out: values.out, name: options.serverName, baseUrl: options.baseUrl, envPrefix: options.envPrefix, transport: values.transport, port: values.port, include: options.include, exclude: options.exclude };
