@@ -194,7 +194,7 @@ async function main(): Promise<void> {
     fail('--port requires --transport http and an integer between 0 and 65535');
   }
 
-  if (values['poll-interval'] && (!values.watch || !/^https?:\/\//i.test(spec))) {
+  if (values['poll-interval'] !== undefined && (!values.watch || !/^https?:\/\//i.test(spec))) {
     fail('--poll-interval requires --watch and an HTTP(S) spec URL');
   }
   if (values.watch && command === 'serve') fail('--watch is only supported by generate');
