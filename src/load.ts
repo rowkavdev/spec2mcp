@@ -16,10 +16,14 @@ const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'
 
 export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   let text: string;
+  let referenceBase = input;
   if (/^https?:\/\//i.test(input)) {
     const res = await fetch(input);
     if (!res.ok) throw new Error(`Failed to fetch spec: HTTP ${res.status} from ${input}`);
     text = await res.text();
+    // Relative references belong to the document actually returned, which may
+    // be in another directory or host after an HTTP redirect.
+    referenceBase = res.url || input;
   } else {
     text = await readFile(input, 'utf8');
   }
@@ -47,7 +51,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
       // Servers come from host/basePath/schemes and securityDefinitions
       // become components.securitySchemes, so auth and base URL handling
       // are unchanged.
-      const bundled2 = await withProtectedReferences(raw, options => $RefParser.bundle(input, raw as never, options));
+      const bundled2 = await withProtectedReferences(raw, options => $RefParser.bundle(referenceBase, raw as never, options));
       const { openapi } = await convertSwagger2(bundled2 as never, { patch: true, warnOnly: true } as never);
       raw = openapi;
       convertedFromSwagger2 = true;
@@ -70,7 +74,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   // rejects loopback and private hosts and broke local dev specs (#168).
   const doc = (await withProtectedReferences(raw, bundleOptions => (convertedFromSwagger2
     ? $RefParser.bundle(raw as never, bundleOptions)
-    : $RefParser.bundle(input as never, raw as never, bundleOptions)))) as unknown as OpenAPIV3.Document;
+    : $RefParser.bundle(referenceBase as never, raw as never, bundleOptions)))) as unknown as OpenAPIV3.Document;
 
   // External YAML refs can introduce alias cycles not present in the root.
   rejectObjectCycles(doc);
