@@ -190,6 +190,7 @@ async function main(): Promise<void> {
   if (flags.transport !== undefined && !['stdio', 'http'].includes(flags.transport)) fail('--transport must be stdio or http');
   if (command !== 'serve' && (flags.transport !== undefined || flags.port !== undefined)) fail('--transport and --port are only valid with serve');
   if (command === 'serve' && flags.out !== undefined) fail('--out is only valid with generate');
+  if (flags.out === '') fail('--out must be a non-empty directory path');
   if (flags.port !== undefined && (flags.transport !== 'http' || !/^(0|[1-9][0-9]*)$/.test(flags.port) || Number(flags.port) > 65535)) {
     fail('--port requires --transport http and an integer between 0 and 65535');
   }
