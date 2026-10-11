@@ -914,6 +914,10 @@ function isJsonMediaType(mediaType: string): boolean {
   return normalized === 'application/json' || normalized.endsWith('+json');
 }
 
+function isFormMediaType(mediaType: string | undefined): boolean {
+  return mediaType?.split(';', 1)[0]?.trim().toLowerCase() === 'application/x-www-form-urlencoded';
+}
+
 function schemaIsObject(schema: Record<string, unknown>): boolean {
   const t = schema.type;
   if (typeof t === 'string') return t === 'object';
@@ -1242,7 +1246,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       // Raw JSON and form bodies still use their declared source constraints.
       // Other free-form media retain the old view.
       let rawSchema: Record<string, unknown> | undefined;
-      if (contentType && (isJsonMediaType(contentType) || contentType === 'application/x-www-form-urlencoded')) {
+      if (contentType && (isJsonMediaType(contentType) || isFormMediaType(contentType))) {
         const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
         const node = body?.content?.[contentType]?.schema;
         if (node && typeof node === 'object') {
@@ -1264,7 +1268,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         apiFieldPath: [],
         required: bodyRequired,
         schema: rawSchema ? { ...rawSchema, description: rawSchema.description ?? op.requestBodyDescription ?? 'Raw request body.' }
-          : contentType === 'application/x-www-form-urlencoded'
+          : isFormMediaType(contentType)
           ? { type: 'object', description: op.requestBodyDescription ?? 'Form fields; array serialization follows the spec encoding.' }
           : contentType && (contentType === 'application/xml' || contentType === 'text/xml' || contentType.endsWith('+xml'))
             ? { type: 'string', description: op.requestBodyDescription ?? 'Pre-serialized XML request body.' }
@@ -1352,7 +1356,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       const schema = resolveDocRef(requestBody?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
       if (schema?.type === 'object' && emptyObjectSatisfies(schema)) tool.requiredEmptyObject = true;
     }
-    if (contentType === 'application/x-www-form-urlencoded') {
+    if (contentType && isFormMediaType(contentType)) {
       const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const encodings = requestBody?.content?.[contentType]?.encoding;
       if (encodings && Object.keys(encodings).length > 0) {
