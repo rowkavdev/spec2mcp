@@ -709,7 +709,10 @@ function extractRequestBodyDescription(requestBody: RequestBody | undefined): st
 function extractMultipart(requestBody: RequestBody | undefined): MultipartInfo | undefined {
   if (!requestBody) return undefined;
   const body = normalizedRequestBody(requestBody);
-  const multipartRaw = body.content?.['multipart/form-data']?.schema;
+  const mediaType = Object.keys(body.content ?? {}).find(
+    (media) => media.split(';', 1)[0]?.trim().toLowerCase() === 'multipart/form-data',
+  );
+  const multipartRaw = mediaType ? body.content?.[mediaType]?.schema : undefined;
   const schema = resolveDocRef(multipartRaw);
   if (!schema || !schema.properties || typeof schema.properties !== 'object') {
     return undefined;

@@ -566,6 +566,10 @@ function disambiguateArgNames(args: ToolArg[]): void {
   }
 }
 
+function isMultipartMediaType(contentType: string): boolean {
+  return contentType.split(';', 1)[0]?.trim().toLowerCase() === 'multipart/form-data';
+}
+
 function pickContentType(contentTypes: string[]): string | undefined {
   if (contentTypes.includes('application/json')) return 'application/json';
   return contentTypes[0];
@@ -932,8 +936,8 @@ function schemaIsObject(schema: Record<string, unknown>): boolean {
  * filename and MIME type; the runtime turns it into a FormData file part.
  * Scalar fields are appended as form fields, object/array fields as JSON.
  */
-function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, warnings: string[]): Record<string, unknown> | undefined {
-  const root = resolveDocRef(body?.content?.['multipart/form-data']?.schema) as Record<string, unknown> | undefined;
+function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[]): Record<string, unknown> | undefined {
+  const root = resolveDocRef(body?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
   const source = mergedProperties(root)[field.name];
   if (source === undefined) return undefined;
   try {
@@ -945,7 +949,7 @@ function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBod
   }
 }
 
-function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, warnings: string[]): ToolArg {
+function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[]): ToolArg {
   if (field.isBinary) {
     const arg: ToolArg = {
       name: field.name,
@@ -972,7 +976,7 @@ function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObj
     }
     return arg;
   }
-  const source = multipartSourceSchema(field, body, warnings);
+  const source = multipartSourceSchema(field, body, contentType, warnings);
   if (source) return { name: field.name, apiName: field.name, location: 'body', apiFieldPath: [], required: field.required, schema: source };
   const schema: Record<string, unknown> = { description: field.description };
   if (field.type === 'object') {
@@ -1224,11 +1228,11 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
           nullableParents.push({ arg, node });
         }
       }
-    } else if (contentType === 'multipart/form-data' && op.multipart) {
+    } else if (contentType && isMultipartMediaType(contentType) && op.multipart) {
       const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
-      const encodings = body?.content?.['multipart/form-data']?.encoding;
+      const encodings = body?.content?.[contentType]?.encoding;
       for (const field of op.multipart.fields) {
-        const arg = multipartFieldArg(field, body, warnings);
+        const arg = multipartFieldArg(field, body, contentType, warnings);
         const declaredMime = encodings?.[field.name]?.contentType;
         if (arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
           arg.defaultMimeType = declaredMime.trim();
@@ -1350,7 +1354,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     };
     if (contentType) tool.contentType = contentType;
     if (op.requestBodyIsArray) tool.requestBodyIsArray = true;
-    if (bodyRequired && contentType !== undefined && (isJsonMediaType(contentType) || contentType === 'multipart/form-data') &&
+    if (bodyRequired && contentType !== undefined && (isJsonMediaType(contentType) || isMultipartMediaType(contentType)) &&
       !args.some((arg) => arg.location === 'body' && arg.required)) {
       const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const schema = resolveDocRef(requestBody?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;

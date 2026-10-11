@@ -632,7 +632,7 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
   let body;
   const bodyArgs = tool.args.filter((a) => a.location === 'body');
   if (bodyArgs.length > 0 && bodyArgs.some((a) => args[a.name] !== undefined)) {
-    if (tool.contentType === 'multipart/form-data') {
+    if (baseContentType(tool.contentType) === 'multipart/form-data') {
       try {
         body = buildFormBody(tool, args);
       } catch (err) {
@@ -691,7 +691,7 @@ async function executeTool(manifest, tool, args, validateOutput, validateInput) 
   // requestBody.required is independent of property.required. A required
   // object with only optional fields still needs an on-wire empty body.
   if (body === undefined && tool.requiredEmptyObject) {
-    if (tool.contentType === 'multipart/form-data') {
+    if (baseContentType(tool.contentType) === 'multipart/form-data') {
       body = new FormData();
     } else {
       body = '{}';
