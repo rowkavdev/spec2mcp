@@ -273,6 +273,19 @@ function parameterNegation(source: unknown, label: string, warnings: string[], r
   }
 }
 
+/** Content schemas use the same document-aware intersection mapper as ref siblings. */
+function contentParameterSchema(source: unknown, label: string, warnings: string[], doc: OpenAPIV3.Document, jsonContent: boolean): Record<string, unknown> {
+  if (!doc.openapi.startsWith('3.1.')) return boundedParameterSchema(source, label, warnings, jsonContent);
+  try {
+    return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, true) as Record<string, unknown> ?? {};
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+    warnings.push(`${label} content schema constraints omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+    // Do not reuse a partially widened tree: a nested not reverses its polarity.
+    return {};
+  }
+}
+
 function boundedParameterSchema(source: unknown, label: string, warnings: string[], jsonContent = false): Record<string, unknown> {
   try {
     return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
@@ -347,7 +360,7 @@ function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
   if (media.length === 1) {
-    return boundedParameterSchema(media[0]![1].schema, `${location} parameter "${p.name}"`, warnings, isJsonMediaType(media[0]![0]));
+    return contentParameterSchema(media[0]![1].schema, `${location} parameter "${p.name}"`, warnings, doc, isJsonMediaType(media[0]![0]));
   }
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
@@ -464,7 +477,7 @@ function cookieArrayItemSchema(raw: unknown, label: string, warnings: string[], 
 function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean, doc: OpenAPIV3.Document): Record<string, unknown> {
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
-    return boundedParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, isJsonMediaType(media[0]![0]));
+    return contentParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, doc, isJsonMediaType(media[0]![0]));
   }
   const schema = formCookieArgSchema(param, warnings, refSiblings);
   if (!refSiblings) return schema;
@@ -870,6 +883,15 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     }
     chain = new Set(refChain);
     chain.add(ref);
+    if (budget.document && refSiblings) {
+      const siblings = Object.fromEntries(Object.entries(target).filter(([key]) => key !== '$ref'));
+      const mapped = dereferenceSchema(resolved, chain, budget, depth + 1, onUnresolved, refSiblings);
+      if (Object.keys(siblings).length === 0) return mapped;
+      charge(budget, 12); // allOf shell and separator
+      // Siblings are not inside the referenced target: reusing that target
+      // here is a valid second conjunct, not a reference cycle.
+      return { allOf: [mapped, dereferenceSchema(siblings, refChain, budget, depth + 1, onUnresolved, refSiblings)] };
+    }
     if (refSiblings) {
       const siblings = Object.fromEntries(Object.entries(target).filter(([key]) => key !== '$ref'));
       if (Object.keys(siblings).length > 0) {
