@@ -300,7 +300,50 @@ function objectParameterSchema(resolved: Record<string, unknown> | undefined, p:
   return restoreNullable(described, resolved);
 }
 
+/** Preserve every 3.1 reference-hop sibling as a conjunct of the adapted view. */
+function parameterRefSiblings(schema: Record<string, unknown>, source: unknown, label: string, warnings: string[], doc: OpenAPIV3.Document): Record<string, unknown> {
+  let node = source;
+  const seen = new Set<string>();
+  const mapped: unknown[] = [];
+  const budget: SchemaBudget = { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc };
+  try {
+    while (node && typeof node === 'object' && !Array.isArray(node)) {
+      const raw = node as Record<string, unknown>;
+      if (typeof raw.$ref !== 'string') break;
+      if (seen.has(raw.$ref) || seen.size >= MAX_SCHEMA_DEPTH || !raw.$ref.startsWith('#/')) throw new IncompleteSchema();
+      seen.add(raw.$ref);
+      const siblings = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== '$ref'));
+      if (Object.keys(siblings).length > 0) mapped.push(dereferenceSchema(siblings, new Set(), budget, 0, undefined, true));
+      node = doc;
+      for (const part of raw.$ref.slice(2).split('/')) {
+        const key = part.replace(/~1/g, '/').replace(/~0/g, '~');
+        if (!node || typeof node !== 'object' || !Object.hasOwn(node, key)) throw new IncompleteSchema();
+        node = (node as Record<string, unknown>)[key];
+      }
+    }
+    return mapped.length ? { ...schema, allOf: [...(Array.isArray(schema.allOf) ? schema.allOf : []), ...mapped] } : schema;
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+    warnings.push(`${label} reference sibling constraints omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+    return schema;
+  }
+}
+
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
+  const schema = adaptedParameterArgSchema(doc, op, p, location, warnings);
+  if (!doc.openapi.startsWith('3.1.')) return schema;
+  const source = sourceParameter(doc, op, p.name, location)?.schema;
+  const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
+  // Forge stringifies path enum values before the adapted type is restored.
+  // Typed sibling enums must intersect the same primitive values, not strings.
+  if (location === 'path' && typeof (source as Record<string, unknown> | undefined)?.$ref === 'string' && Array.isArray(schema.enum) && schema.enum.every(value => typeof value === 'string') && typeof resolved?.type === 'string') {
+    schema.enum = restoreEnumTypes(schema.enum as string[], resolved.type);
+  }
+  if (schema.items && resolved?.items) schema.items = parameterRefSiblings(schema.items as Record<string, unknown>, resolved.items, `${location} parameter "${p.name}" items`, warnings, doc);
+  return parameterRefSiblings(schema, source, `${location} parameter "${p.name}"`, warnings, doc);
+}
+
+function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
   const candidate = sourceParameter(doc, op, p.name, location);
   const media = Object.entries(candidate?.content ?? {});
   if (media.length === 1) {
@@ -418,12 +461,16 @@ function cookieArrayItemSchema(raw: unknown, label: string, warnings: string[], 
   return schema;
 }
 
-function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean): Record<string, unknown> {
+function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean, doc: OpenAPIV3.Document): Record<string, unknown> {
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
     return boundedParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, isJsonMediaType(media[0]![0]));
   }
-  return formCookieArgSchema(param, warnings, refSiblings);
+  const schema = formCookieArgSchema(param, warnings, refSiblings);
+  if (!refSiblings) return schema;
+  const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
+  if (schema.items && resolved?.items) schema.items = parameterRefSiblings(schema.items as Record<string, unknown>, resolved.items, `cookie parameter "${param.name}" items`, warnings, doc);
+  return parameterRefSiblings(schema, param.schema, `cookie parameter "${param.name}"`, warnings, doc);
 }
 
 function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean): Record<string, unknown> {
@@ -648,7 +695,7 @@ const DEREFERENCE_BYTE_BUDGET = MAX_OUTPUT_SCHEMA_BYTES + 64;
 
 class SchemaTooLarge extends Error {}
 
-type SchemaBudget = { remaining: number; strict?: boolean };
+type SchemaBudget = { remaining: number; strict?: boolean; document?: OpenAPIV3.Document };
 class IncompleteSchema extends Error {}
 
 function charge(budget: SchemaBudget, bytes: number): void {
@@ -796,7 +843,17 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     }
     let resolved: Record<string, unknown>;
     try {
-      resolved = resolveDocRef(target) as Record<string, unknown>;
+      if (budget.document) {
+        // Resolve exactly one hop so recursive mapping sees each ref's siblings.
+        if (!ref.startsWith('#/')) throw new IncompleteSchema();
+        let node: unknown = budget.document;
+        for (const part of ref.slice(2).split('/')) {
+          const key = part.replace(/~1/g, '/').replace(/~0/g, '~');
+          if (!node || typeof node !== 'object' || !Object.hasOwn(node, key)) throw new IncompleteSchema();
+          node = (node as Record<string, unknown>)[key];
+        }
+        resolved = node as Record<string, unknown>;
+      } else resolved = resolveDocRef(target) as Record<string, unknown>;
     } catch (error) {
       // Forge follows pure ref chains recursively before our cycle guard can see them.
       if (budget.strict && error instanceof RangeError) throw new IncompleteSchema();
@@ -822,6 +879,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
         target = { allOf: [resolved, siblings] };
       } else target = resolved;
     } else target = resolved;
+    if (budget.document) return dereferenceSchema(target, chain, budget, depth + 1, onUnresolved, refSiblings);
   }
 
   charge(budget, 2); // braces
@@ -1159,7 +1217,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       // Cookie parameters always serialize with form style; record it
       // explicitly so the runtime does not fall back to simple.
       const media = Object.keys(p.content ?? {});
-      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p, warnings, doc.openapi.startsWith('3.1.')), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p, warnings, doc.openapi.startsWith('3.1.'), doc), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
