@@ -158,7 +158,7 @@ const JSON_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', '
 
 /** Recover representable primitive unions (including null) and array item
  * compositions from the loaded parameter schema when Forge narrows them. */
-function primitiveComposition(schema: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function primitiveComposition(schema: Record<string, unknown> | undefined, label: string, warnings: string[], refSiblings: boolean): Record<string, unknown> | undefined {
   if (!schema) return undefined;
   if (!Array.isArray(schema.anyOf) && !Array.isArray(schema.oneOf)) return undefined;
   const keys = ['allOf', 'anyOf', 'oneOf'].filter(key => Array.isArray(schema[key]));
@@ -178,9 +178,11 @@ function primitiveComposition(schema: Record<string, unknown> | undefined): Reco
     if (mapped.some((branch) => branch === undefined)) return undefined;
     compositions[key] = mapped;
   }
+  const negation = schema.not === undefined ? undefined : parameterNegation(schema.not, label, warnings, refSiblings);
   const result = {
     ...(typeof schema.type === 'string' ? { type: schema.type } : {}),
     ...(Array.isArray(schema.enum) ? { enum: schema.enum } : {}),
+    ...(negation !== undefined ? { not: negation } : {}),
     ...compositions,
   };
   return {
@@ -260,6 +262,17 @@ function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: strin
     .find(param => param?.in === location && param.name === name);
 }
 
+/** Never widen an incomplete schema beneath not: that reverses fallback polarity. */
+function parameterNegation(source: unknown, label: string, warnings: string[], refSiblings: boolean): unknown {
+  try {
+    return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true }, 0, undefined, refSiblings);
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+    warnings.push(`${label} not constraint omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+    return undefined;
+  }
+}
+
 function boundedParameterSchema(source: unknown, label: string, warnings: string[], jsonContent = false): Record<string, unknown> {
   try {
     return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
@@ -295,7 +308,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   }
   const source = candidate?.schema as Record<string, unknown> | undefined;
   const resolved = resolveDocRef(source) as Record<string, unknown> | undefined;
-  const composition = primitiveComposition(resolved);
+  const composition = primitiveComposition(resolved, `${location} parameter "${p.name}"`, warnings, doc.openapi.startsWith('3.1.'));
   if (composition) {
     // Constraints sibling to the composition (const, pattern, ranges) apply
     // to every branch and must survive the mapping (review on #151).
@@ -303,7 +316,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
   }
   if (resolved?.type === 'array') {
     const items = resolveDocRef(resolved.items) as Record<string, unknown> | undefined;
-    const itemComposition = primitiveComposition(items);
+    const itemComposition = primitiveComposition(items, `${location} parameter "${p.name}" items`, warnings, doc.openapi.startsWith('3.1.'));
     if (itemComposition) {
       // Same for an items composition: the items' own constraints and the
       // outer array constraints both survive (review on #151).
@@ -395,9 +408,9 @@ function cookieParameters(doc: OpenAPIV3.Document, op: OperationInfo): OpenAPIV3
   return [...byName.values()];
 }
 
-function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
+function cookieArrayItemSchema(raw: unknown, label: string, warnings: string[], refSiblings: boolean): Record<string, unknown> {
   const items = resolveDocRef(raw) as Record<string, unknown> | undefined;
-  const composition = primitiveComposition(items);
+  const composition = primitiveComposition(items, `${label} items`, warnings, refSiblings);
   if (composition) return applySourceConstraints(composition, items);
   const type = typeof items?.type === 'string' && JSON_TYPES.has(items.type) && items.type !== 'array' ? items.type : 'string';
   const schema: Record<string, unknown> = { type };
@@ -405,17 +418,17 @@ function cookieArrayItemSchema(raw: unknown): Record<string, unknown> {
   return schema;
 }
 
-function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[]): Record<string, unknown> {
+function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean): Record<string, unknown> {
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
     return boundedParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, isJsonMediaType(media[0]![0]));
   }
-  return formCookieArgSchema(param, warnings);
+  return formCookieArgSchema(param, warnings, refSiblings);
 }
 
-function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[]): Record<string, unknown> {
+function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean): Record<string, unknown> {
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
-  const composition = primitiveComposition(resolved);
+  const composition = primitiveComposition(resolved, `cookie parameter "${param.name}"`, warnings, refSiblings);
   if (composition) return applySourceConstraints({
     ...composition,
     ...(Array.isArray(resolved?.enum) ? { enum: resolved.enum.filter((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v)) } : {}),
@@ -429,7 +442,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
     return { ...object, ...(param.description ? { description: param.description } : {}) };
   }
   schema.type = type;
-  if (type === 'array') schema.items = cookieArrayItemSchema(resolved?.items);
+  if (type === 'array') schema.items = cookieArrayItemSchema(resolved?.items, `cookie parameter "${param.name}"`, warnings, refSiblings);
   if (Array.isArray(resolved?.enum)) schema.enum = resolved.enum.filter((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v));
   if (resolved?.default !== undefined) schema.default = resolved.default;
   const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
@@ -635,7 +648,8 @@ const DEREFERENCE_BYTE_BUDGET = MAX_OUTPUT_SCHEMA_BYTES + 64;
 
 class SchemaTooLarge extends Error {}
 
-type SchemaBudget = { remaining: number };
+type SchemaBudget = { remaining: number; strict?: boolean };
+class IncompleteSchema extends Error {}
 
 function charge(budget: SchemaBudget, bytes: number): void {
   budget.remaining -= bytes;
@@ -750,7 +764,10 @@ function dereferenceSchemaValue(key: string, value: unknown, chain: Set<string>,
 function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaBudget, depth = 0, onUnresolved?: (ref: string) => void, refSiblings = false): unknown {
   if (Array.isArray(node)) {
     charge(budget, 2); // brackets
-    if (depth > MAX_SCHEMA_DEPTH) return [];
+    if (depth > MAX_SCHEMA_DEPTH) {
+      if (budget.strict) throw new IncompleteSchema();
+      return [];
+    }
     const out: unknown[] = [];
     for (const value of node) {
       if (out.length) charge(budget, 1); // comma
@@ -763,6 +780,7 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
     return node;
   }
   if (depth > MAX_SCHEMA_DEPTH) {
+    if (budget.strict) throw new IncompleteSchema();
     charge(budget, 2);
     return {};
   }
@@ -772,11 +790,20 @@ function dereferenceSchema(node: unknown, refChain: Set<string>, budget: SchemaB
   let chain = refChain;
   if (ref) {
     if (refChain.has(ref)) {
+      if (budget.strict) throw new IncompleteSchema();
       charge(budget, 2);
       return {};
     }
-    const resolved = resolveDocRef(target) as Record<string, unknown>;
+    let resolved: Record<string, unknown>;
+    try {
+      resolved = resolveDocRef(target) as Record<string, unknown>;
+    } catch (error) {
+      // Forge follows pure ref chains recursively before our cycle guard can see them.
+      if (budget.strict && error instanceof RangeError) throw new IncompleteSchema();
+      throw error;
+    }
     if (resolved === target) {
+      if (budget.strict) throw new IncompleteSchema();
       // The walk failed: the pointer does not resolve (#112). Never
       // advertise the empty collapse as a schema - the caller treats the
       // shape as unknown and surfaces the ref instead.
@@ -1132,7 +1159,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       // Cookie parameters always serialize with form style; record it
       // explicitly so the runtime does not fall back to simple.
       const media = Object.keys(p.content ?? {});
-      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p, warnings), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
+      args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p, warnings, doc.openapi.startsWith('3.1.')), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
     }
 
     const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
