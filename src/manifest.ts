@@ -217,6 +217,42 @@ function applySourceConstraints(schema: Record<string, unknown>, source: Record<
   return schema;
 }
 
+/** Recover validation from allOf-only primitives without replacing Forge's flat view. */
+function restoreFlatAllOfConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): void {
+  if (!source || source.anyOf || source.oneOf || !Array.isArray(source.allOf) || source.allOf.length === 0) return;
+  const branches = source.allOf.map(branch => resolveDocRef(branch) as Record<string, unknown> | undefined);
+  if (branches.some(branch => !branch || branch.allOf || branch.anyOf || branch.oneOf || branch.properties || branch.items ||
+    (branch.type !== undefined && (typeof branch.type !== 'string' || !['string', 'number', 'integer', 'boolean', 'null'].includes(branch.type))))) return;
+  const types = new Set([source.type, ...branches.map(branch => branch!.type)].filter(type => type !== undefined));
+  if (types.size === 0 || [...types].some(type => typeof type !== 'string' || !['string', 'number', 'integer', 'boolean', 'null'].includes(type))) return;
+  // A compatible intersection has one primitive type, or integer intersected with number.
+  if (types.size === 1) schema.type = [...types][0];
+  else if ([...types].every(type => type === 'integer' || type === 'number')) schema.type = 'integer';
+  else return;
+  if (Array.isArray(schema.enum) && schema.enum.every(value => typeof value === 'string')) {
+    schema.enum = restoreEnumTypes(schema.enum as string[], String(schema.type));
+  }
+  // Forge can replace a root enum with the last branch's enum. Keep both conjuncts.
+  if (Array.isArray(source.enum)) schema.enum = source.enum;
+  const constraints = branches.map(branch => {
+    const out: Record<string, unknown> = {};
+    for (const key of PARAMETER_CONSTRAINTS) if (branch![key] !== undefined) out[key] = branch![key];
+    if (Array.isArray(branch!.enum)) out.enum = branch!.enum;
+    return out;
+  }).filter(branch => Object.keys(branch).length > 0);
+  // Keep existing flat enum/default/nullable shapes when every recovered key fits.
+  if (constraints.length === 1 && Object.keys(constraints[0]!).every(key => schema[key] === undefined ||
+    JSON.stringify(schema[key]) === JSON.stringify(constraints[0]![key]))) {
+    Object.assign(schema, constraints[0]);
+  } else if (constraints.length > 0) schema.allOf = constraints;
+}
+
+function restoreFlatParameterConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): void {
+  restoreFlatAllOfConstraints(schema, source);
+  const items = schema.items as Record<string, unknown> | undefined;
+  if (items && typeof items === 'object') restoreFlatAllOfConstraints(items, resolveDocRef(source?.items) as Record<string, unknown> | undefined);
+}
+
 function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: string, location: string): OpenAPIV3.ParameterObject | undefined {
   const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
   const parameters = [...(doc.paths[op.path]?.parameters ?? []), ...(operation?.parameters ?? [])];
@@ -279,6 +315,7 @@ function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: Param
     return objectParameterSchema(resolved, p, `${location} parameter "${p.name}"`, warnings);
   }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
+  restoreFlatParameterConstraints(base, resolved);
   // A path value is always present, so only query and header values may be null.
   return location === 'path' ? base : restoreNullable(base, resolved);
 }
