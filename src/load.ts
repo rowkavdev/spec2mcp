@@ -598,6 +598,12 @@ export async function loadOverlays(paths: string[]): Promise<ApiOverlayFile[]> {
     if (!overlay || typeof overlay !== 'object' || typeof overlay.overlay !== 'string' || !Array.isArray(overlay.actions)) {
       throw new Error(`${path} is not an OpenAPI Overlay document (expected an "overlay" version and an "actions" array).`);
     }
+    // Only update payloads enter the spec. Unused extension aliases may be
+    // cyclic and are safely visited by lexical reference discovery.
+    for (const action of overlay.actions) {
+      const update = action && typeof action === 'object' ? action.update : undefined;
+      if (update && typeof update === 'object') rejectObjectCycles(update);
+    }
     files.push({ name: basename(path), overlay });
   }
   return files;
