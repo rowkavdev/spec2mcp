@@ -4,6 +4,7 @@
  * reaches the Forge pipeline.
  */
 import { readFile } from 'node:fs/promises';
+import { captureRootServerOrigins } from './server-origin.js';
 import { randomUUID } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import $RefParser, { getJsonSchemaRefParserDefaultOptions, type FileInfo, type Plugin } from '@apidevtools/json-schema-ref-parser';
@@ -37,6 +38,8 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   }
 
   rejectObjectCycles(raw);
+
+  captureRootServerOrigins(raw, referenceBase);
 
   let convertedFromSwagger2 = false;
   if (!('openapi' in raw)) {
