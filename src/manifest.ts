@@ -520,6 +520,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
   const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
   if (description) schema.description = description;
   applySourceConstraints(schema, resolved);
+  restoreFlatParameterConstraints(schema, resolved);
   return resolved?.nullable === true ? { anyOf: [schema, { type: 'null' }] } : schema;
 }
 
