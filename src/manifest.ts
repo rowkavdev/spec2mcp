@@ -1505,6 +1505,17 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         // null, so wrap the adapted view rather than loosening `required`.
         const source = bodySchemaAtPath(doc, op, p.apiFieldPath);
         const leafSchema = applySourceConstraints(restoreIntegerType(argSchema(p), source), source);
+        // Forge's body metadata retains only nonempty strings. Recover the
+        // exact supported primitive enum before the existing nullable wrapper.
+        if (typeof leafSchema.type === 'string' && ['string', 'number', 'integer', 'boolean', 'null'].includes(leafSchema.type) &&
+          Array.isArray(source?.enum) && source.enum.length > 0 &&
+          source.enum.every(value => value === null || ['string', 'number', 'boolean'].includes(typeof value))) {
+          try { leafSchema.enum = copySchemaLiteral(source.enum, { remaining: DEREFERENCE_BYTE_BUDGET }); }
+          catch (error) {
+            if (!(error instanceof SchemaTooLarge)) throw error;
+            warnings.push(`${toolName} body field "${argName}" enum exceeds the input budget; retaining its adapted enum`);
+          }
+        }
         if (leafSchema.type === 'array' && source?.items !== undefined) {
           try {
             leafSchema.items = dereferenceSchema(source.items, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.'));
