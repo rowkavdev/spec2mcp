@@ -14,6 +14,7 @@ import {
   type OperationInfo,
   type ParameterInfo,
 } from '../vendor/forge/index.js';
+import { sourceServerUrl } from './server-origin.js';
 import { toToolName, dedupeNames, toEnvPrefix } from './naming.js';
 import { buildAuthPlan, type AuthPlan } from './auth.js';
 import { operationIncluded, operationTags, type OperationFilters } from './filter.js';
@@ -1460,11 +1461,12 @@ function collectResponseContentTypes(op: OperationInfo): string[] {
 
 /** Resolve the declared defaults before a server URL enters routing. */
 function serverUrl(server: OpenAPIV3.ServerObject): string {
-  return server.url.replace(/\{([^}]+)\}/g, (_match, name: string) => {
+  const expanded = server.url.replace(/\{([^}]+)\}/g, (_match, name: string) => {
     const value = server.variables?.[name]?.default;
     if (value === undefined) throw new Error(`Server variable "${name}" has no default`);
     return String(value);
   });
+  return sourceServerUrl(server, expanded);
 }
 
 export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {}): Manifest {
