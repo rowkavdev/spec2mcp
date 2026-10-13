@@ -262,6 +262,21 @@ function restoreFlatParameterConstraints(schema: Record<string, unknown>, source
   if (items && typeof items === 'object') restoreFlatAllOfConstraints(items, resolveDocRef(source?.items) as Record<string, unknown> | undefined, `${label} items`, warnings, doc);
 }
 
+/** Plain scalar roots need negation independently of composition recovery. */
+function restoreScalarRootNot(schema: Record<string, unknown>, source: Record<string, unknown> | undefined, label: string, warnings: string[], doc: OpenAPIV3.Document): void {
+  if (!source || source.not === undefined || typeof source.type !== 'string' || !['string', 'integer', 'number', 'boolean'].includes(source.type)) return;
+  try {
+    const not = dereferenceSchema(source.not, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.'));
+    checkArrayShellSupported(not, doc.openapi.startsWith('3.1.'));
+    if (schema.not === undefined) schema.not = not;
+    else if (JSON.stringify(schema.not) !== JSON.stringify(not)) schema.allOf = [...(Array.isArray(schema.allOf) ? schema.allOf : []), { not }];
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+    const reason = error instanceof IncompleteSchema && error.message ? error.message : 'schema exceeds the input budget/depth, contains an unresolved/cyclic reference, or uses unsupported conditional/unevaluated constraints';
+    warnings.push(`${label} root not constraint omitted: ${reason}`);
+  }
+}
+
 function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: string, location: string): OpenAPIV3.ParameterObject | undefined {
   const operation = doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods];
   const parameters = [...(doc.paths[op.path]?.parameters ?? []), ...(operation?.parameters ?? [])];
@@ -509,6 +524,7 @@ function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p
   }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
   restoreFlatParameterConstraints(base, resolved, `${location} parameter "${p.name}"`, warnings, doc);
+  restoreScalarRootNot(base, resolved, `${location} parameter "${p.name}"`, warnings, doc);
   restoreArrayShell(base, resolved, `${location} parameter "${p.name}"`, warnings, doc);
   // A path value is always present, so only query and header values may be null.
   return location === 'path' ? base : restoreNullable(base, resolved);
@@ -642,6 +658,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
   if (description) schema.description = description;
   applySourceConstraints(schema, resolved);
   restoreFlatParameterConstraints(schema, resolved, `cookie parameter "${param.name}"`, warnings, doc);
+  restoreScalarRootNot(schema, resolved, `cookie parameter "${param.name}"`, warnings, doc);
   restoreArrayShell(schema, resolved, `cookie parameter "${param.name}"`, warnings, doc);
   return resolved?.nullable === true ? { anyOf: [schema, { type: 'null' }] } : schema;
 }
