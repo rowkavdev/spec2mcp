@@ -357,6 +357,78 @@ function parameterRefSiblings(schema: Record<string, unknown>, source: unknown, 
   }
 }
 
+/** Recover array-shell validation without replacing adapted item schemas. */
+/** Throws when a schema node carries keywords the runtime validator cannot enforce for an array shell. */
+function rejectUnsupportedShellKeywords(rec: Record<string, unknown>, refSiblings: boolean): void {
+  if (['minContains', 'maxContains'].some(key => rec[key] !== undefined)) throw new IncompleteSchema('contains-count constraints are not supported by the runtime validator');
+  if (['if', 'then', 'else', 'unevaluatedItems', 'unevaluatedProperties'].some(key => rec[key] !== undefined) ||
+    (!refSiblings && ['contains', 'const', 'minContains', 'maxContains'].some(key => rec[key] !== undefined))) throw new IncompleteSchema();
+}
+
+/** Rejects array-shell schema keywords the runtime validator cannot enforce completely. */
+function checkArrayShellSupported(node: unknown, refSiblings: boolean, depth = 0): void {
+  if (depth > MAX_SCHEMA_DEPTH) throw new SchemaTooLarge();
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) { for (const child of node) checkArrayShellSupported(child, refSiblings, depth + 1); return; }
+  const rec = node as Record<string, unknown>;
+  rejectUnsupportedShellKeywords(rec, refSiblings);
+  for (const key of [...SCHEMA_SINGLE_KEYS, ...SCHEMA_ARRAY_KEYS]) checkArrayShellSupported(rec[key], refSiblings, depth + 1);
+  for (const key of SCHEMA_MAP_KEYS) {
+    const map = rec[key];
+    if (map && typeof map === 'object') for (const child of Object.values(map)) checkArrayShellSupported(child, refSiblings, depth + 1);
+  }
+}
+
+function stripAllOfFormats(node: unknown): void {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+  const rec = node as Record<string, unknown>;
+  if (Array.isArray(rec.allOf)) for (const child of rec.allOf) {
+    if (child && typeof child === 'object') { delete child.format; stripAllOfFormats(child); }
+  }
+}
+
+/** The source subtree for one array-shell keyword; contains carries its count keywords with it. */
+function arrayShellInput(source: Record<string, unknown>, key: string): Record<string, unknown> {
+  if (key !== 'contains') return { [key]: source[key] };
+  return { contains: source.contains, ...(source.minContains !== undefined ? { minContains: source.minContains } : {}), ...(source.maxContains !== undefined ? { maxContains: source.maxContains } : {}) };
+}
+
+/** Direct array bounds from each plain allOf branch, kept when the whole allOf could not be mapped. */
+function allOfBranchBounds(allOf: unknown[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const branch of allOf.slice(0, MAX_SCHEMA_DEPTH)) {
+    if (!branch || typeof branch !== 'object' || '$ref' in branch) continue;
+    const bounds: Record<string, unknown> = {};
+    for (const name of ['minItems', 'maxItems', 'uniqueItems']) if ((branch as Record<string, unknown>)[name] !== undefined) bounds[name] = (branch as Record<string, unknown>)[name];
+    if (Object.keys(bounds).length) out.push(bounds);
+  }
+  return out;
+}
+
+function restoreArrayShell(schema: Record<string, unknown>, source: Record<string, unknown> | undefined, label: string, warnings: string[], doc: OpenAPIV3.Document): Record<string, unknown> {
+  if (source?.type !== 'array' || schema.type !== 'array') return schema;
+  const refSiblings = doc.openapi.startsWith('3.1.');
+  const conjuncts: Record<string, unknown>[] = [];
+  // Map each root keyword independently: a failed negative cannot erase bounds.
+  for (const key of ['allOf', 'anyOf', 'oneOf', 'not', ...(refSiblings ? ['contains'] : [])]) {
+    if (source[key] === undefined) continue;
+    try {
+      const mapped = dereferenceSchema(arrayShellInput(source, key), new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, refSiblings);
+      checkArrayShellSupported(mapped, refSiblings);
+      if (key === 'allOf') stripAllOfFormats(mapped);
+      conjuncts.push(mapped as Record<string, unknown>);
+    } catch (error) {
+      if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+      const reason = error instanceof IncompleteSchema && error.message ? error.message : 'schema exceeds the input budget/depth, contains an unresolved/cyclic reference, or uses unsupported conditional/unevaluated constraints';
+      warnings.push(`${label} array ${key} constraint omitted: ${reason}`);
+      // allOf is conjunctive: direct branch bounds remain independently proven.
+      if (key === 'allOf' && Array.isArray(source.allOf)) conjuncts.push(...allOfBranchBounds(source.allOf));
+    }
+  }
+  if (conjuncts.length) schema.allOf = [...(Array.isArray(schema.allOf) ? schema.allOf : []), ...conjuncts];
+  return schema;
+}
+
 /** Prove a terminal boolean independently of the schema-copy depth budget. */
 function terminalBooleanSchema(source: unknown, doc: OpenAPIV3.Document): boolean | undefined {
   let node = source;
@@ -423,11 +495,12 @@ function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p
   }
   if (resolved?.type === 'array') {
     const items = resolveDocRef(resolved.items) as Record<string, unknown> | undefined;
+    if (typeof items?.type === 'string' && ['string', 'number', 'integer', 'boolean', 'null'].includes(items.type) && p.type !== 'array') p = { ...p, type: 'array', itemType: items.type };
     const itemComposition = primitiveComposition(items, `${location} parameter "${p.name}" items`, warnings, doc.openapi.startsWith('3.1.'));
     if (itemComposition) {
       // Same for an items composition: the items' own constraints and the
       // outer array constraints both survive (review on #151).
-      const schema = applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved);
+      const schema = restoreArrayShell(applySourceConstraints({ type: 'array', items: itemComposition, ...(p.description ? { description: p.description } : {}) }, resolved), resolved, `${location} parameter "${p.name}"`, warnings, doc);
       return location === 'path' ? schema : restoreNullable(schema, resolved);
     }
   }
@@ -436,6 +509,7 @@ function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p
   }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
   restoreFlatParameterConstraints(base, resolved, `${location} parameter "${p.name}"`, warnings, doc);
+  restoreArrayShell(base, resolved, `${location} parameter "${p.name}"`, warnings, doc);
   // A path value is always present, so only query and header values may be null.
   return location === 'path' ? base : restoreNullable(base, resolved);
 }
@@ -568,6 +642,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
   if (description) schema.description = description;
   applySourceConstraints(schema, resolved);
   restoreFlatParameterConstraints(schema, resolved, `cookie parameter "${param.name}"`, warnings, doc);
+  restoreArrayShell(schema, resolved, `cookie parameter "${param.name}"`, warnings, doc);
   return resolved?.nullable === true ? { anyOf: [schema, { type: 'null' }] } : schema;
 }
 
