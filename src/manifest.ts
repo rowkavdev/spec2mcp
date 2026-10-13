@@ -286,6 +286,12 @@ function contentParameterSchema(source: unknown, label: string, warnings: string
   }
 }
 
+function bodySchemaBudget(doc: OpenAPIV3.Document): SchemaBudget {
+  return doc.openapi.startsWith('3.1.')
+    ? { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }
+    : { remaining: DEREFERENCE_BYTE_BUDGET };
+}
+
 function boundedParameterSchema(source: unknown, label: string, warnings: string[], jsonContent = false): Record<string, unknown> {
   try {
     return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown> ?? {};
@@ -1276,12 +1282,13 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
     const wholeBodyRequired = contentType !== undefined && isJsonMediaType(contentType) && (missingRequiredBodyField(doc, op, contentType) || emptyBodyFallback);
     let wholeBodySchema: Record<string, unknown> | undefined;
     if (wholeBodyRequired) {
-      const node = resolveDocRef((normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema);
+      const source = (normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject)?.content?.[contentType]?.schema;
+      const node = doc.openapi.startsWith('3.1.') ? source : resolveDocRef(source);
       try {
-        wholeBodySchema = pinBodyDiscriminator(node, dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>);
+        wholeBodySchema = pinBodyDiscriminator(node, dereferenceSchema(node, new Set(), bodySchemaBudget(doc), 0, undefined, doc.openapi.startsWith('3.1.')) as Record<string, unknown>);
       } catch (error) {
-        if (!(error instanceof SchemaTooLarge)) throw error;
-        warnings.push(`${toolName}: required body properties cannot be flattened and the whole-body schema exceeds the input budget; using an unconstrained body argument`);
+        if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+        warnings.push(`${toolName}: required body properties cannot be flattened and the whole-body schema exceeds the input budget or cannot be fully resolved; using an unconstrained body argument`);
         wholeBodySchema = {};
       }
     }
@@ -1299,13 +1306,14 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       args.push({ name: 'body', location: 'body', apiFieldPath: [], required: bodyRequired, schema: wholeBodySchema! });
     } else if (op.requestBodyIsArray) {
       const requestBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
-      const raw = resolveDocRef(requestBody?.content?.[contentType ?? 'application/json']?.schema);
+      const source = requestBody?.content?.[contentType ?? 'application/json']?.schema;
+      const raw = doc.openapi.startsWith('3.1.') ? source : resolveDocRef(source);
       let schema: Record<string, unknown>;
       try {
-        schema = dereferenceSchema(raw, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+        schema = dereferenceSchema(raw, new Set(), bodySchemaBudget(doc), 0, undefined, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
       } catch (error) {
-        if (!(error instanceof SchemaTooLarge)) throw error;
-        warnings.push(`${toolName}: array body schema exceeds the input budget; using an unconstrained array argument`);
+        if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+        warnings.push(`${toolName}: array body schema exceeds the input budget or cannot be fully resolved; using an unconstrained array argument`);
         schema = { type: 'array', items: {} };
       }
       args.push({
@@ -1422,12 +1430,12 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         if (node && typeof node === 'object') {
           let unresolved = false;
           try {
-            const schema = dereferenceSchema(node, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }, 0,
+            const schema = dereferenceSchema(node, new Set(), bodySchemaBudget(doc), 0,
               () => { unresolved = true; }, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
             if (!unresolved) rawSchema = schema;
             else warnings.push(`${toolName}: raw body schema has an unresolved reference; using an unconstrained body argument`);
           } catch (error) {
-            if (!(error instanceof SchemaTooLarge)) throw error;
+            if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
             warnings.push(`${toolName}: raw body schema exceeds the input budget; using an unconstrained body argument`);
           }
         }
