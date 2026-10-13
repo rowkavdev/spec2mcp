@@ -220,7 +220,7 @@ function applySourceConstraints(schema: Record<string, unknown>, source: Record<
 }
 
 /** Recover validation from allOf-only primitives without replacing Forge's flat view. */
-function restoreFlatAllOfConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): void {
+function restoreFlatAllOfConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined, label: string, warnings: string[], doc: OpenAPIV3.Document): void {
   if (!source || source.anyOf || source.oneOf || !Array.isArray(source.allOf) || source.allOf.length === 0) return;
   const branches = source.allOf.map(branch => resolveDocRef(branch) as Record<string, unknown> | undefined);
   if (branches.some(branch => !branch || branch.allOf || branch.anyOf || branch.oneOf || branch.properties || branch.items ||
@@ -240,6 +240,13 @@ function restoreFlatAllOfConstraints(schema: Record<string, unknown>, source: Re
     const out: Record<string, unknown> = {};
     for (const key of PARAMETER_CONSTRAINTS) if (branch![key] !== undefined) out[key] = branch![key];
     if (Array.isArray(branch!.enum)) out.enum = branch!.enum;
+    if (branch!.not !== undefined) {
+      try { out.not = dereferenceSchema(branch!.not, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.')); }
+      catch (error) {
+        if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+        warnings.push(`${label} allOf branch not constraint omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+      }
+    }
     return out;
   }).filter(branch => Object.keys(branch).length > 0);
   // Keep existing flat enum/default/nullable shapes when every recovered key fits.
@@ -249,10 +256,10 @@ function restoreFlatAllOfConstraints(schema: Record<string, unknown>, source: Re
   } else if (constraints.length > 0) schema.allOf = constraints;
 }
 
-function restoreFlatParameterConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined): void {
-  restoreFlatAllOfConstraints(schema, source);
+function restoreFlatParameterConstraints(schema: Record<string, unknown>, source: Record<string, unknown> | undefined, label: string, warnings: string[], doc: OpenAPIV3.Document): void {
+  restoreFlatAllOfConstraints(schema, source, label, warnings, doc);
   const items = schema.items as Record<string, unknown> | undefined;
-  if (items && typeof items === 'object') restoreFlatAllOfConstraints(items, resolveDocRef(source?.items) as Record<string, unknown> | undefined);
+  if (items && typeof items === 'object') restoreFlatAllOfConstraints(items, resolveDocRef(source?.items) as Record<string, unknown> | undefined, `${label} items`, warnings, doc);
 }
 
 function sourceParameter(doc: OpenAPIV3.Document, op: OperationInfo, name: string, location: string): OpenAPIV3.ParameterObject | undefined {
@@ -428,7 +435,7 @@ function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p
     return objectParameterSchema(resolved, p, `${location} parameter "${p.name}"`, warnings, doc);
   }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
-  restoreFlatParameterConstraints(base, resolved);
+  restoreFlatParameterConstraints(base, resolved, `${location} parameter "${p.name}"`, warnings, doc);
   // A path value is always present, so only query and header values may be null.
   return location === 'path' ? base : restoreNullable(base, resolved);
 }
@@ -531,14 +538,14 @@ function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], r
     return { ...contentParameterSchema(param.schema, `cookie parameter "${param.name}"`, warnings, doc, false, 'object'),
       ...(param.description ? { description: param.description } : {}) };
   }
-  const schema = formCookieArgSchema(param, warnings, refSiblings);
+  const schema = formCookieArgSchema(param, warnings, refSiblings, doc);
   if (!refSiblings) return schema;
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
   if (schema.items && resolved?.items) schema.items = parameterRefSiblings(schema.items as Record<string, unknown>, resolved.items, `cookie parameter "${param.name}" items`, warnings, doc);
   return parameterRefSiblings(schema, param.schema, `cookie parameter "${param.name}"`, warnings, doc);
 }
 
-function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean): Record<string, unknown> {
+function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], refSiblings: boolean, doc: OpenAPIV3.Document): Record<string, unknown> {
   const resolved = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
   const composition = primitiveComposition(resolved, `cookie parameter "${param.name}"`, warnings, refSiblings);
   if (composition) return applySourceConstraints({
@@ -560,7 +567,7 @@ function formCookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[
   const description = param.description ?? (typeof resolved?.description === 'string' ? resolved.description : undefined);
   if (description) schema.description = description;
   applySourceConstraints(schema, resolved);
-  restoreFlatParameterConstraints(schema, resolved);
+  restoreFlatParameterConstraints(schema, resolved, `cookie parameter "${param.name}"`, warnings, doc);
   return resolved?.nullable === true ? { anyOf: [schema, { type: 'null' }] } : schema;
 }
 
