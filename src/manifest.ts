@@ -1202,20 +1202,22 @@ function schemaIsObject(schema: Record<string, unknown>): boolean {
  * filename and MIME type; the runtime turns it into a FormData file part.
  * Scalar fields are appended as form fields, object/array fields as JSON.
  */
-function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[]): Record<string, unknown> | undefined {
+function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[], doc: OpenAPIV3.Document): Record<string, unknown> | undefined {
   const root = resolveDocRef(body?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
   const source = mergedProperties(root)[field.name];
   if (source === undefined) return undefined;
   try {
-    return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET }) as Record<string, unknown>;
+    return dereferenceSchema(source, new Set(), bodySchemaBudget(doc), 0, undefined, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
   } catch (error) {
-    if (!(error instanceof SchemaTooLarge)) throw error;
-    warnings.push(`multipart field "${field.name}" schema exceeds the input budget; using its adapted schema`);
+    if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+    warnings.push(doc.openapi.startsWith('3.1.')
+      ? `multipart field "${field.name}" schema exceeds the input budget or cannot be fully resolved; using its adapted schema`
+      : `multipart field "${field.name}" schema exceeds the input budget; using its adapted schema`);
     return undefined;
   }
 }
 
-function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[]): ToolArg {
+function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[], doc: OpenAPIV3.Document): ToolArg {
   if (field.isBinary) {
     const arg: ToolArg = {
       name: field.name,
@@ -1242,7 +1244,7 @@ function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObj
     }
     return arg;
   }
-  const source = multipartSourceSchema(field, body, contentType, warnings);
+  const source = multipartSourceSchema(field, body, contentType, warnings, doc);
   if (source) return { name: field.name, apiName: field.name, location: 'body', apiFieldPath: [], required: field.required, schema: source };
   const schema: Record<string, unknown> = { description: field.description };
   if (field.type === 'object') {
@@ -1514,7 +1516,7 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
       const encodings = body?.content?.[contentType]?.encoding;
       for (const field of op.multipart.fields) {
-        const arg = multipartFieldArg(field, body, contentType, warnings);
+        const arg = multipartFieldArg(field, body, contentType, warnings, doc);
         const declaredMime = encodings?.[field.name]?.contentType;
         if (arg.binary && typeof declaredMime === 'string' && declaredMime.trim()) {
           arg.defaultMimeType = declaredMime.trim();
