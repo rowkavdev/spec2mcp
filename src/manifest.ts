@@ -1625,6 +1625,21 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
             warnings.push(`${toolName} body field "${argName}" not constraint omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
           }
         }
+        if (leafSchema.type === 'array' && source) {
+          for (const key of ['not', ...(doc.openapi.startsWith('3.1.') ? ['contains'] : [])]) {
+            if (source[key] === undefined) continue;
+            try {
+              const input = key === 'contains' ? { contains: source.contains, ...(source.minContains !== undefined ? { minContains: source.minContains } : {}), ...(source.maxContains !== undefined ? { maxContains: source.maxContains } : {}) } : { not: source.not };
+              const mapped = dereferenceSchema(input, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
+              checkArrayShellSupported(mapped, doc.openapi.startsWith('3.1.'));
+              Object.assign(leafSchema, mapped);
+            } catch (error) {
+              if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+              const reason = error instanceof IncompleteSchema && error.message ? error.message : 'schema exceeds the input budget/depth, contains an unresolved/cyclic reference, or uses unsupported conditional/unevaluated constraints';
+              warnings.push(`${toolName} body field "${argName}" ${key} constraint omitted: ${reason}`);
+            }
+          }
+        }
         if (leafSchema.type === 'array' && source?.items !== undefined) {
           try {
             leafSchema.items = dereferenceSchema(source.items, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.'));
