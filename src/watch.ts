@@ -103,12 +103,12 @@ export async function watchSpec(
     }
   }
 
-  if (isUrl) {
-    pollTimer = setInterval(() => { void refresh(); }, interval);
-  }
   try {
     await syncWatchers([]);
     await refresh();
+    // Bootstrap owns the initial digest. Poll only after watcher setup and
+    // that refresh finish, so a slow failing setup cannot start stray HTTP.
+    if (isUrl) pollTimer = setInterval(() => { void refresh(); }, interval);
   } catch (error) {
     closed = true;
     clearTimeout(timer);
