@@ -752,7 +752,7 @@ const SCHEMA_SINGLE_KEYS = new Set(['items', 'additionalItems', 'additionalPrope
 const SCHEMA_ARRAY_KEYS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
 const SCHEMA_MAP_KEYS = new Set(['properties', 'patternProperties', 'dependentSchemas', '$defs', 'definitions']);
 
-function stripWriteOnlyRequired(node: unknown, inherited = new Set<string>()): void {
+function stripWriteOnlyRequired(node: unknown, inherited = new Set<string>(), conditionalProjection = true): void {
   if (!node || typeof node !== 'object' || Array.isArray(node)) return;
   const rec = node as Record<string, unknown>;
   const writeOnly = new Set(inherited);
@@ -777,15 +777,15 @@ function stripWriteOnlyRequired(node: unknown, inherited = new Set<string>()): v
   // Recurse only into schema-bearing keywords. Walking every value reached
   // into const/enum/default/examples literal data and rewrote it (review on
   // #141).
-  for (const key of SCHEMA_SINGLE_KEYS) stripWriteOnlyRequired(rec[key]);
+  for (const key of SCHEMA_SINGLE_KEYS) stripWriteOnlyRequired(rec[key], conditionalProjection && (key === 'then' || key === 'else') ? writeOnly : new Set(), conditionalProjection && key !== 'if' && key !== 'not');
   for (const key of SCHEMA_ARRAY_KEYS) {
     const value = rec[key];
-    if (Array.isArray(value)) for (const sub of value) stripWriteOnlyRequired(sub, key === 'allOf' ? writeOnly : new Set());
+    if (Array.isArray(value)) for (const sub of value) stripWriteOnlyRequired(sub, key === 'allOf' ? writeOnly : new Set(), conditionalProjection && key !== 'anyOf' && key !== 'oneOf');
   }
   for (const key of SCHEMA_MAP_KEYS) {
     const value = rec[key];
     if (value && typeof value === 'object' && !Array.isArray(value)) {
-      for (const sub of Object.values(value)) stripWriteOnlyRequired(sub);
+      for (const sub of Object.values(value)) stripWriteOnlyRequired(sub, new Set(), conditionalProjection);
     }
   }
 }
