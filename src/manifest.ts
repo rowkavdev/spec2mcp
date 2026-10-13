@@ -1261,7 +1261,10 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
       args.push({ name: p.name, location: 'cookie', ...(media.length === 1 ? { parameterContentType: media[0] } : {}), required: p.required === true, schema: cookieArgSchema(p, warnings, doc.openapi.startsWith('3.1.'), doc), style: p.style ?? 'form', ...(p.explode !== undefined ? { explode: p.explode } : {}) });
     }
 
-    const contentType = op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
+    const sourceBody = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+    const sourceMedia = pickContentType(Object.keys(sourceBody?.content ?? {}));
+    const booleanBody = doc.openapi.startsWith('3.1.') && sourceMedia !== undefined && isJsonMediaType(sourceMedia) && typeof sourceBody?.content?.[sourceMedia]?.schema === 'boolean';
+    const contentType = booleanBody ? sourceMedia : op.hasRequestBody ? pickContentType(op.requestContentTypes) : undefined;
 
     // Schema.required applies only when a body is present. The OpenAPI
     // requestBody.required flag controls whether any body is needed at all.
@@ -1420,19 +1423,19 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         arg.required = bodyRequired && arg.required;
         args.push(arg);
       }
-    } else if (op.hasRequestBody) {
+    } else if (op.hasRequestBody || booleanBody) {
       // Raw JSON and form bodies still use their declared source constraints.
       // Other free-form media retain the old view.
       let rawSchema: Record<string, unknown> | undefined;
       if (contentType && (isJsonMediaType(contentType) || isFormMediaType(contentType))) {
         const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
         const node = body?.content?.[contentType]?.schema;
-        if (node && typeof node === 'object') {
+        if ((node && typeof node === 'object') || (doc.openapi.startsWith('3.1.') && typeof node === 'boolean')) {
           let unresolved = false;
           try {
             const schema = dereferenceSchema(node, new Set(), bodySchemaBudget(doc), 0,
               () => { unresolved = true; }, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
-            if (!unresolved) rawSchema = schema;
+            if (!unresolved) rawSchema = doc.openapi.startsWith('3.1.') && typeof schema === 'boolean' ? (schema ? {} : { not: {} }) : schema;
             else warnings.push(`${toolName}: raw body schema has an unresolved reference; using an unconstrained body argument`);
           } catch (error) {
             if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
