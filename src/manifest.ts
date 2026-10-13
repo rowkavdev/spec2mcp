@@ -277,12 +277,14 @@ function parameterNegation(source: unknown, label: string, warnings: string[], r
 function contentParameterSchema(source: unknown, label: string, warnings: string[], doc: OpenAPIV3.Document, jsonContent: boolean, kind = 'content'): Record<string, unknown> {
   if (!doc.openapi.startsWith('3.1.')) return boundedParameterSchema(source, label, warnings, jsonContent);
   try {
-    return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, true) as Record<string, unknown> ?? {};
+    const mapped = dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, true);
+    return typeof mapped === 'boolean' ? (mapped ? {} : { not: {} }) : mapped as Record<string, unknown> ?? {};
   } catch (error) {
     if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
     warnings.push(`${label} ${kind} schema constraints omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
     // Do not reuse a partially widened tree: a nested not reverses its polarity.
-    return {};
+    // A proven false terminal remains false even if sibling copying failed.
+    return terminalBooleanSchema(source, doc) === false ? { not: {} } : {};
   }
 }
 
@@ -348,8 +350,38 @@ function parameterRefSiblings(schema: Record<string, unknown>, source: unknown, 
   }
 }
 
+/** Prove a terminal boolean independently of the schema-copy depth budget. */
+function terminalBooleanSchema(source: unknown, doc: OpenAPIV3.Document): boolean | undefined {
+  let node = source;
+  const seen = new Set<string>();
+  // A finite document has finitely many distinct local refs. A cycle or an
+  // unresolved pointer is not a proof; long acyclic chains still are.
+  while (node && typeof node === 'object' && !Array.isArray(node)) {
+    const ref = (node as Record<string, unknown>).$ref;
+    if (typeof ref !== 'string' || !ref.startsWith('#/') || seen.has(ref)) return undefined;
+    seen.add(ref);
+    node = doc;
+    for (const part of ref.slice(2).split('/')) {
+      const key = part.replace(/~1/g, '/').replace(/~0/g, '~');
+      if (!node || typeof node !== 'object' || !Object.hasOwn(node, key)) return undefined;
+      node = (node as Record<string, unknown>)[key];
+    }
+  }
+  return typeof node === 'boolean' ? node : undefined;
+}
+
+/** Boolean roots need the full 3.1 schema view, not Forge's inferred string. */
+function booleanParameterSchema(source: unknown, description: string | undefined, label: string, warnings: string[], doc: OpenAPIV3.Document): Record<string, unknown> | undefined {
+  if (!doc.openapi.startsWith('3.1.') || terminalBooleanSchema(source, doc) === undefined) return undefined;
+  const schema = contentParameterSchema(source, label, warnings, doc, false, 'boolean');
+  const note = description ?? (source && typeof source === 'object' ? (source as Record<string, unknown>).description : undefined);
+  return { ...schema, ...(typeof note === 'string' ? { description: note } : {}) };
+}
+
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
   const raw = sourceParameter(doc, op, p.name, location)?.schema;
+  const boolean = booleanParameterSchema(raw, p.description, `${location} parameter "${p.name}"`, warnings, doc);
+  if (boolean) return boolean;
   const root = resolveDocRef(raw) as Record<string, unknown> | undefined;
   const item = resolveDocRef(root?.items) as Record<string, unknown> | undefined;
   if (location !== 'path' && doc.openapi.startsWith('3.1.') && root?.type === 'array' && item?.type === 'object') {
@@ -491,6 +523,8 @@ function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], r
   if (media.length === 1) {
     return contentParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, doc, isJsonMediaType(media[0]![0]));
   }
+  const boolean = booleanParameterSchema(param.schema, param.description, `cookie parameter "${param.name}"`, warnings, doc);
+  if (boolean) return boolean;
   const root = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
   const item = resolveDocRef(root?.items) as Record<string, unknown> | undefined;
   if (refSiblings && (root?.type === 'object' || (root?.type === 'array' && item?.type === 'object'))) {

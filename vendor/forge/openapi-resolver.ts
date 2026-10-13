@@ -527,6 +527,14 @@ function mergeParameters(
   return [...merged.values()];
 }
 
+// OpenAPI 3.1 permits boolean parameter schemas (`true` allows any value,
+// `false` forbids any value). Boolean schemas carry no object metadata, so
+// property access via `in` must be guarded. The boolean constraint itself is
+// enforced by the manifest arg-schema layer.
+function isSchemaObject(schema: SchemaRef | undefined | boolean): schema is SchemaRef {
+  return typeof schema === 'object' && schema !== null && !Array.isArray(schema);
+}
+
 function extractParameters(params: Parameter[] | undefined, location: 'path' | 'query' | 'header'): ParameterInfo[] {
   if (!params) return [];
   return params
@@ -565,16 +573,16 @@ function extractParameters(params: Parameter[] | undefined, location: 'path' | '
       if (desc) info.description = desc.trim();
       // Extract enum values from schema — check the resolved schema ($ref target) first,
       // then the original schema (for inline enums without $ref)
-      const enumSchema = resolvedSchema?.enum ? resolvedSchema : p.schema;
-      if (enumSchema && 'enum' in enumSchema && Array.isArray(enumSchema.enum)) {
+      const enumSchema = isSchemaObject(resolvedSchema) && resolvedSchema.enum ? resolvedSchema : p.schema;
+      if (isSchemaObject(enumSchema) && 'enum' in enumSchema && Array.isArray(enumSchema.enum)) {
         info.enumValues = enumSchema.enum.flatMap((value: unknown) =>
           typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? [String(value)] : [],
         );
       }
       // Default — same precedence as enum: $ref target first, then inline.
-      const defaultSchema = resolvedSchema?.default !== undefined ? resolvedSchema : p.schema;
+      const defaultSchema = isSchemaObject(resolvedSchema) && resolvedSchema.default !== undefined ? resolvedSchema : p.schema;
       if (
-        defaultSchema &&
+        isSchemaObject(defaultSchema) &&
         'default' in defaultSchema &&
         defaultSchema.default !== undefined &&
         (typeof defaultSchema.default === 'string' ||
