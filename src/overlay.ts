@@ -64,12 +64,16 @@ export function applyOverlays(doc: OpenAPIV3.Document, overlays: ApiOverlayFile[
       } else if (update !== undefined) {
         validateUpdate(update);
         for (const match of matches) {
-          if (typeof match.value !== 'object' || match.value === null || Array.isArray(match.value)) {
+          if (typeof match.value !== 'object' || match.value === null) {
             throw new Error(`Overlay ${name} action ${i + 1} target must resolve to an object for "update": ${target}`);
+          }
+          if (!Array.isArray(match.value) && !isPlainObject(update)) {
+            throw new Error('Overlay "update" must be an object to merge into its target.');
           }
         }
         for (const match of matches) {
-          deepMerge(match.value as Record<string, unknown>, update);
+          if (Array.isArray(match.value)) match.value.push(structuredClone(update));
+          else deepMerge(match.value as Record<string, unknown>, update);
         }
       }
     });
