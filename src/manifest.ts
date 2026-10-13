@@ -642,6 +642,75 @@ function bodySchemaAtPath(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath:
   return schema;
 }
 
+/** Keep each property contribution separate while following a flattened path. */
+function bodyPropertyContributions(doc: OpenAPIV3.Document, op: OperationInfo, fieldPath: string[]): unknown[] {
+  const body = normalizedRequestBody(doc.paths[op.path]?.[op.method as OpenAPIV3.HttpMethods]?.requestBody) as OpenAPIV3.RequestBodyObject | undefined;
+  const media = pickContentType(Object.keys(body?.content ?? {}));
+  if (!media || !isJsonMediaType(media)) return [];
+  const out: unknown[] = [];
+  const leaves = new Set<unknown>();
+  const completed = new Map<unknown, Set<number>>();
+  const active = new Map<unknown, Set<number>>();
+  let visits = 4096;
+  const targetOf = (ref: string): unknown => {
+    if (!ref.startsWith('#/') || ref.length > DEREFERENCE_BYTE_BUDGET) throw new IncompleteSchema();
+    let target: unknown = doc;
+    for (const part of ref.slice(2).split('/')) {
+      const key = part.replace(/~1/g, '/').replace(/~0/g, '~');
+      if (!target || typeof target !== 'object' || !Object.hasOwn(target, key)) throw new IncompleteSchema();
+      target = (target as Record<string, unknown>)[key];
+    }
+    return target;
+  };
+  const collectLeaf = (raw: unknown, node: Record<string, unknown> | undefined, offset: number, depth: number): void => {
+    // Pure ref shells are idempotent aliases. Shells with siblings remain
+    // separate conjuncts in 3.1 and must not disappear in target deduping.
+    if (node && typeof node.$ref === 'string' && (!doc.openapi.startsWith('3.1.') || Object.keys(node).length === 1)) {
+      collect(targetOf(node.$ref), offset, depth + 1);
+    } else if (!leaves.has(raw)) {
+      if (out.length >= 128) throw new SchemaTooLarge();
+      leaves.add(raw); out.push(raw);
+    }
+  };
+  const collectChildren = (node: Record<string, unknown>, offset: number, depth: number): void => {
+    if (typeof node.$ref === 'string') collect(targetOf(node.$ref), offset, depth + 1);
+    if (typeof node.$ref !== 'string' || doc.openapi.startsWith('3.1.')) {
+      if (Array.isArray(node.allOf)) for (const branch of node.allOf) collect(branch, offset, depth + 1);
+      const properties = node.properties as Record<string, unknown> | undefined;
+      if (properties && Object.hasOwn(properties, fieldPath[offset]!)) collect(properties[fieldPath[offset]!], offset + 1, depth + 1);
+    }
+  };
+  const collect = (raw: unknown, offset: number, depth: number): void => {
+    if (--visits < 0) throw new SchemaTooLarge();
+    if (depth > MAX_SCHEMA_DEPTH * 2) throw new IncompleteSchema();
+    if (active.get(raw)?.has(offset)) throw new IncompleteSchema();
+    if (completed.get(raw)?.has(offset)) return;
+    const mark = (map: Map<unknown, Set<number>>): void => {
+      const paths = map.get(raw) ?? new Set<number>(); paths.add(offset); map.set(raw, paths);
+    };
+    mark(active);
+    const node = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined;
+    if (offset === fieldPath.length) collectLeaf(raw, node, offset, depth);
+    else if (node) collectChildren(node, offset, depth);
+    active.get(raw)!.delete(offset);
+    mark(completed);
+  };
+  collect(body?.content?.[media]?.schema, 0, 0);
+  return out;
+}
+
+function bodyPropertyIntersection(doc: OpenAPIV3.Document, op: OperationInfo, path: string[], label: string, warnings: string[]): Record<string, unknown> | undefined {
+  try {
+    const sources = bodyPropertyContributions(doc, op, path);
+    if (sources.length < 2) return undefined;
+    return dereferenceSchema({ allOf: sources }, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.')) as Record<string, unknown>;
+  } catch (error) {
+    if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema) && !(error instanceof RangeError)) throw error;
+    warnings.push(`${label} property intersection constraints omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+    return undefined;
+  }
+}
+
 function pinBodyDiscriminator(source: unknown, schema: Record<string, unknown>): Record<string, unknown> {
   const root = source as Record<string, unknown> | undefined;
   const discriminator = root?.discriminator as { propertyName?: string; mapping?: Record<string, string> } | undefined;
@@ -1382,9 +1451,11 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
         }
         // Outer nullability is wrapped below; restore only item nullability here.
         restoreNullable(leafSchema, { items: source?.items });
-        const schema = bodyPropertyNullable(doc, op, p.apiFieldPath)
+        const adapted = bodyPropertyNullable(doc, op, p.apiFieldPath)
           ? { anyOf: [leafSchema, { type: 'null' }] }
           : leafSchema;
+        const intersection = bodyPropertyIntersection(doc, op, p.apiFieldPath, `${toolName} body field "${argName}"`, warnings);
+        const schema = intersection ? { ...adapted, allOf: intersection.allOf } : adapted;
         args.push({ name: argName, location: 'body', apiFieldPath: p.apiFieldPath, required, schema });
       }
       // A nullable object parent flattens to leaves in Forge's view, so
