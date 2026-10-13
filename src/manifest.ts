@@ -1516,6 +1516,14 @@ export function buildManifest(doc: OpenAPIV3.Document, opts: ManifestOptions = {
             warnings.push(`${toolName} body field "${argName}" enum exceeds the input budget; retaining its adapted enum`);
           }
         }
+        if (typeof leafSchema.type === 'string' && ['string', 'number', 'integer', 'boolean', 'null'].includes(leafSchema.type) && source?.not !== undefined) {
+          try {
+            leafSchema.not = dereferenceSchema(source.not, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.'));
+          } catch (error) {
+            if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
+            warnings.push(`${toolName} body field "${argName}" not constraint omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+          }
+        }
         if (leafSchema.type === 'array' && source?.items !== undefined) {
           try {
             leafSchema.items = dereferenceSchema(source.items, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, doc.openapi.startsWith('3.1.'));
