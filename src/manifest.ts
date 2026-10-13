@@ -1217,6 +1217,69 @@ function multipartSourceSchema(field: MultipartField, body: OpenAPIV3.RequestBod
   }
 }
 
+/** Folds a node's valid minItems/maxItems into the running bounds: the largest minimum and smallest maximum win. */
+function mergeCountBounds(counts: Record<string, unknown>, node: Record<string, unknown>): void {
+  for (const key of ['minItems', 'maxItems'] as const) {
+    const value = node[key];
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+      counts[key] = typeof counts[key] !== 'number' ? value : key === 'minItems' ? Math.max(counts[key] as number, value) : Math.min(counts[key] as number, value);
+    }
+  }
+}
+
+/** Follows a "#/..." pointer through the document; target is undefined and found is false when a segment is missing. */
+function resolveLocalPointer(doc: unknown, ref: string): { target: unknown; found: boolean } {
+  let target: unknown = doc;
+  for (const part of ref.slice(2).split('/')) {
+    const key = part.replace(/~1/g, '/').replace(/~0/g, '~');
+    if (!target || typeof target !== 'object' || !Object.hasOwn(target, key)) return { target: undefined, found: false };
+    target = (target as Record<string, unknown>)[key];
+  }
+  return { target, found: true };
+}
+
+/** Recover only array counts, never binary string constraints on upload objects. */
+function binaryArrayCounts(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[], doc: OpenAPIV3.Document): Record<string, unknown> {
+  const root = resolveDocRef(body?.content?.[contentType]?.schema) as Record<string, unknown> | undefined;
+  const source = mergedProperties(root)[field.name];
+  const counts: Record<string, unknown> = {};
+  const seen = new Set<unknown>();
+  const active = new Set<unknown>();
+  let visits = 4096;
+  let incomplete = false;
+  const walkBranches = (branches: unknown[], depth: number): void => {
+    for (const branch of branches) {
+      if (visits <= 0) { incomplete = true; break; }
+      walk(branch, depth + 1);
+    }
+  };
+  const walk = (raw: unknown, depth: number): void => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+    if (--visits < 0 || depth > MAX_SCHEMA_DEPTH * 2 || active.has(raw)) { incomplete = true; return; }
+    if (seen.has(raw)) return;
+    seen.add(raw); active.add(raw);
+    const node = raw as Record<string, unknown>;
+    const ref = typeof node.$ref === 'string' ? node.$ref : undefined;
+    // Root sibling proofs do not depend on successfully resolving a ref.
+    if (!ref || doc.openapi.startsWith('3.1.')) {
+      mergeCountBounds(counts, node);
+      if (Array.isArray(node.allOf)) walkBranches(node.allOf, depth);
+    }
+    if (ref) {
+      if (!ref.startsWith('#/') || ref.length > DEREFERENCE_BYTE_BUDGET) incomplete = true;
+      else {
+        const resolved = resolveLocalPointer(doc, ref);
+        if (!resolved.found) incomplete = true;
+        walk(resolved.target, depth + 1);
+      }
+    }
+    active.delete(raw);
+  };
+  walk(source, 0);
+  if (incomplete) warnings.push(`multipart field "${field.name}" array count recovery incomplete: schema exceeds traversal limits or contains an unresolved/cyclic reference; retaining independently recovered bounds`);
+  return counts;
+}
+
 function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObject | undefined, contentType: string, warnings: string[], doc: OpenAPIV3.Document): ToolArg {
   if (field.isBinary) {
     const arg: ToolArg = {
@@ -1240,7 +1303,7 @@ function multipartFieldArg(field: MultipartField, body: OpenAPIV3.RequestBodyObj
     };
     if (field.type === 'array') {
       arg.binaryArray = true;
-      arg.schema = { type: 'array', items: arg.schema, description: field.description };
+      arg.schema = { type: 'array', items: arg.schema, description: field.description, ...binaryArrayCounts(field, body, contentType, warnings, doc) };
     }
     return arg;
   }
