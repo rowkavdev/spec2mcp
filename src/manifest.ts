@@ -274,13 +274,13 @@ function parameterNegation(source: unknown, label: string, warnings: string[], r
 }
 
 /** Content schemas use the same document-aware intersection mapper as ref siblings. */
-function contentParameterSchema(source: unknown, label: string, warnings: string[], doc: OpenAPIV3.Document, jsonContent: boolean): Record<string, unknown> {
+function contentParameterSchema(source: unknown, label: string, warnings: string[], doc: OpenAPIV3.Document, jsonContent: boolean, kind = 'content'): Record<string, unknown> {
   if (!doc.openapi.startsWith('3.1.')) return boundedParameterSchema(source, label, warnings, jsonContent);
   try {
     return dereferenceSchema(source, new Set(), { remaining: DEREFERENCE_BYTE_BUDGET, strict: true, document: doc }, 0, undefined, true) as Record<string, unknown> ?? {};
   } catch (error) {
     if (!(error instanceof SchemaTooLarge) && !(error instanceof IncompleteSchema)) throw error;
-    warnings.push(`${label} content schema constraints omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
+    warnings.push(`${label} ${kind} schema constraints omitted: schema exceeds the input budget/depth or contains an unresolved/cyclic reference`);
     // Do not reuse a partially widened tree: a nested not reverses its polarity.
     return {};
   }
@@ -301,8 +301,8 @@ function boundedParameterSchema(source: unknown, label: string, warnings: string
  * Query and header objects keep their declared properties, required keys and
  * nested constraints, like cookie objects do (#259).
  */
-function objectParameterSchema(resolved: Record<string, unknown> | undefined, p: ParameterInfo, label: string, warnings: string[]): Record<string, unknown> {
-  const object = boundedParameterSchema(resolved, label, warnings);
+function objectParameterSchema(resolved: Record<string, unknown> | undefined, p: ParameterInfo, label: string, warnings: string[], doc: OpenAPIV3.Document): Record<string, unknown> {
+  const object = contentParameterSchema(resolved, label, warnings, doc, false, 'object');
   const described: Record<string, unknown> = { ...object, ...(p.description ? { description: p.description } : {}) };
   // A composed schema has no type to widen, so a nullable one is wrapped
   // instead (allOf alone would reject null).
@@ -343,6 +343,12 @@ function parameterRefSiblings(schema: Record<string, unknown>, source: unknown, 
 }
 
 function parameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p: ParameterInfo, location: 'path' | 'query' | 'header', warnings: string[]): Record<string, unknown> {
+  const raw = sourceParameter(doc, op, p.name, location)?.schema;
+  const root = resolveDocRef(raw) as Record<string, unknown> | undefined;
+  const item = resolveDocRef(root?.items) as Record<string, unknown> | undefined;
+  if (location !== 'path' && doc.openapi.startsWith('3.1.') && root?.type === 'array' && item?.type === 'object') {
+    return { ...contentParameterSchema(raw, `${location} parameter "${p.name}"`, warnings, doc, false, 'object'), ...(p.description ? { description: p.description } : {}) };
+  }
   const schema = adaptedParameterArgSchema(doc, op, p, location, warnings);
   if (!doc.openapi.startsWith('3.1.')) return schema;
   const source = sourceParameter(doc, op, p.name, location)?.schema;
@@ -381,7 +387,7 @@ function adaptedParameterArgSchema(doc: OpenAPIV3.Document, op: OperationInfo, p
     }
   }
   if ((resolved?.type === 'object' || (resolved?.type === undefined && p.type === 'object')) && location !== 'path') {
-    return objectParameterSchema(resolved, p, `${location} parameter "${p.name}"`, warnings);
+    return objectParameterSchema(resolved, p, `${location} parameter "${p.name}"`, warnings, doc);
   }
   const base = applySourceConstraints(restoreIntegerType(argSchema(p), resolved), resolved);
   restoreFlatParameterConstraints(base, resolved);
@@ -478,6 +484,12 @@ function cookieArgSchema(param: OpenAPIV3.ParameterObject, warnings: string[], r
   const media = Object.entries(param.content ?? {});
   if (media.length === 1) {
     return contentParameterSchema(media[0]![1].schema, `cookie parameter "${param.name}"`, warnings, doc, isJsonMediaType(media[0]![0]));
+  }
+  const root = resolveDocRef(param.schema) as Record<string, unknown> | undefined;
+  const item = resolveDocRef(root?.items) as Record<string, unknown> | undefined;
+  if (refSiblings && (root?.type === 'object' || (root?.type === 'array' && item?.type === 'object'))) {
+    return { ...contentParameterSchema(param.schema, `cookie parameter "${param.name}"`, warnings, doc, false, 'object'),
+      ...(param.description ? { description: param.description } : {}) };
   }
   const schema = formCookieArgSchema(param, warnings, refSiblings);
   if (!refSiblings) return schema;
