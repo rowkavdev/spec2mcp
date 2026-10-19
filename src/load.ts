@@ -52,7 +52,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
       // Servers come from host/basePath/schemes and securityDefinitions
       // become components.securitySchemes, so auth and base URL handling
       // are unchanged.
-      const bundled2 = await withProtectedReferences(raw, options => $RefParser.bundle(referenceBase, raw as never, options));
+      const bundled2 = await withProtectedReferences(raw, options => $RefParser.bundle(referenceBase, raw as never, options), referenceBase);
       const { openapi } = await convertSwagger2(bundled2 as never, { patch: true, warnOnly: true } as never);
       raw = openapi;
       convertedFromSwagger2 = true;
@@ -75,7 +75,7 @@ export async function loadSpec(input: string): Promise<OpenAPIV3.Document> {
   // rejects loopback and private hosts and broke local dev specs (#168).
   const doc = (await withProtectedReferences(raw, bundleOptions => (convertedFromSwagger2
     ? $RefParser.bundle(raw as never, bundleOptions)
-    : $RefParser.bundle(referenceBase as never, raw as never, bundleOptions)))) as unknown as OpenAPIV3.Document;
+    : $RefParser.bundle(referenceBase as never, raw as never, bundleOptions)), convertedFromSwagger2 ? undefined : referenceBase)) as unknown as OpenAPIV3.Document;
 
   // External YAML refs can introduce alias cycles not present in the root.
   rejectObjectCycles(doc);
@@ -180,7 +180,7 @@ function walkReferenceObjects(root: unknown, visit: (node: Record<string, unknow
   visitReferenceObjects(root, 'document', visit);
 }
 
-type ReferenceProtection = { restore: (() => void)[]; literals: WeakSet<object>; marker: string };
+type ReferenceProtection = { restore: (() => void)[]; literals: WeakSet<object>; marker: string; externalRefs?: Map<string, string[]> };
 
 /** Hide literal $ref keys before RefParser sees either root or external data. */
 function protectLiteralReferences(root: unknown, context: ReferenceContext, protection: ReferenceProtection, seen = new WeakSet<object>()): void {
@@ -219,10 +219,44 @@ function hideLiteralReferenceKeys(root: unknown, protection: ReferenceProtection
   for (const value of Object.values(rec)) hideLiteralReferenceKeys(value, protection, seen);
 }
 
-function externalReferenceContext(value: unknown): ReferenceContext {
+/**
+ * Selecting-fragment evidence that an external file is a plain schema map
+ * even though a keyword-named entry makes the root look like one schema
+ * (#408). A standalone schema cannot be selected through its own literal
+ * keyword (`default`, `const`, ...) or through a `type` keyword holding an
+ * object, and a `#/properties`-style single-segment selection uses the
+ * keyword's map value as if it were a schema - so those selections only
+ * make sense as entries of a plain map. Multi-segment keyword paths
+ * (`#/properties/foo`, `#/$defs/Target`) and child-schema selections
+ * (`#/items`) are normal standalone-schema usage and block the flip.
+ */
+function selectingFragmentContext(rec: Record<string, unknown>, fragments: string[]): 'schemaMap' | undefined {
+  const decodeSegment = (segment: string) => decodeURIComponent(segment).replaceAll('~1', '/').replaceAll('~0', '~');
+  let mapEvidence = false;
+  let standaloneEvidence = false;
+  for (const fragment of fragments) {
+    // The whole file is referenced as one schema; keep keyword guessing.
+    if (fragment === '' || fragment === '#') return undefined;
+    if (!fragment.startsWith('#/')) continue;
+    const segments = fragment.slice(2).split('/').map(decodeSegment);
+    const key = segments[0]!;
+    const target = rec[key];
+    if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
+    if (REFERENCE_LITERAL_KEYS.has(key) || key === 'type') { mapEvidence = true; continue; }
+    if (REFERENCE_SCHEMA_MAP_KEYS.has(key)) {
+      if (segments.length === 1) mapEvidence = true; else standaloneEvidence = true;
+      continue;
+    }
+    if (REFERENCE_SCHEMA_CHILD_KEYS.has(key)) standaloneEvidence = true;
+  }
+  return mapEvidence && !standaloneEvidence ? 'schemaMap' : undefined;
+}
+
+function externalReferenceContext(value: unknown, fragments?: string[]): ReferenceContext {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 'schema';
   const rec = value as Record<string, unknown>;
   if ('openapi' in rec || 'swagger' in rec) return 'document';
+  if (fragments && selectingFragmentContext(rec, fragments) === 'schemaMap') return 'schemaMap';
   const schemaKeys = ['type', '$ref', '$schema', '$id', ...REFERENCE_SCHEMA_MAP_KEYS, ...REFERENCE_SCHEMA_CHILD_KEYS, ...REFERENCE_LITERAL_KEYS];
   if (schemaKeys.some(key => Object.hasOwn(rec, key))) return 'schema';
   // Plain external schema maps have no root schema keywords. Each entry can
@@ -230,11 +264,52 @@ function externalReferenceContext(value: unknown): ReferenceContext {
   return 'schemaMap';
 }
 
+/** Resolve an external $ref target to the identity the parser reports for the file. */
+function externalFileId(file: string, base: string): string | undefined {
+  try {
+    if (/^https?:\/\//i.test(file)) return new URL(file).href;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(file)) return undefined;
+    if (/^https?:\/\//i.test(base)) return new URL(file, base).href;
+  } catch { return undefined; }
+  return resolvePath(dirname(base), file);
+}
+
+/** Identity of a file the parser loaded, matching externalFileId. */
+function parsedFileId(url: string): string {
+  if (/^https?:\/\//i.test(url)) {
+    try { return new URL(url).href; } catch { return url; }
+  }
+  return resolvePath(url);
+}
+
+/**
+ * External files the root document selects, with every selecting fragment.
+ * Collected after literal protection, so only real references are seen; the
+ * parser loads each file once, so no single parse call sees them all (#408).
+ */
+function collectExternalRefFragments(root: unknown, base: string): Map<string, string[]> {
+  const fragments = new Map<string, string[]>();
+  walkReferenceObjects(root, rec => {
+    const value = rec.$ref;
+    if (typeof value !== 'string') return;
+    const hashIndex = value.indexOf('#');
+    const file = hashIndex === -1 ? value : value.slice(0, hashIndex);
+    if (!file) return;
+    const id = externalFileId(file, base);
+    if (!id) return;
+    const fragment = hashIndex === -1 ? '' : value.slice(hashIndex);
+    const list = fragments.get(id);
+    if (list) { if (!list.includes(fragment)) list.push(fragment); }
+    else fragments.set(id, [fragment]);
+  });
+  return fragments;
+}
+
 function protectedParser(plugin: Plugin, protection: ReferenceProtection): Plugin {
   const parse = plugin.parse as (file: FileInfo) => unknown | Promise<unknown>;
   return { ...plugin, async parse(file: FileInfo) {
     const value = await parse.call(plugin, file);
-    const context = externalReferenceContext(value);
+    const context = externalReferenceContext(value, protection.externalRefs?.get(parsedFileId(file.url)));
     protectLiteralReferences(value, context, protection);
     // A fragment may select a schema from an otherwise untyped external map.
     if (file.hash.startsWith('#/')) {
@@ -249,9 +324,10 @@ function protectedParser(plugin: Plugin, protection: ReferenceProtection): Plugi
   } };
 }
 
-async function withProtectedReferences<T>(root: unknown, run: (options: ReturnType<typeof referenceParserOptions>) => Promise<T>): Promise<T> {
+async function withProtectedReferences<T>(root: unknown, run: (options: ReturnType<typeof referenceParserOptions>) => Promise<T>, referenceBase?: string): Promise<T> {
   const protection: ReferenceProtection = { restore: [], literals: new WeakSet(), marker: `x-spec2mcp-literal-${randomUUID()}` };
   protectLiteralReferences(root, 'document', protection);
+  if (referenceBase) protection.externalRefs = collectExternalRefFragments(root, referenceBase);
   try {
     const result = await run(referenceParserOptions(protection));
     restoreCopiedLiteralReferences(result, protection.marker);
@@ -684,7 +760,7 @@ export async function localRefDependencies(input: string): Promise<string[]> {
   const text = await readFile(input, 'utf8');
   const raw = parseYaml(text);
   rejectObjectCycles(raw);
-  const refs = await withProtectedReferences(raw, options => $RefParser.resolve(input, raw, options)) as unknown as { paths(...types: string[]): string[] };
+  const refs = await withProtectedReferences(raw, options => $RefParser.resolve(input, raw, options), input) as unknown as { paths(...types: string[]): string[] };
   const root = resolvePath(input);
   return refs.paths('file').map((file: string) => resolvePath(file)).filter((file: string) => file !== root);
 }
