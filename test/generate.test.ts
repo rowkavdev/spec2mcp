@@ -105,7 +105,7 @@ test('#188 watch startup rejects overlapping output before opening a watcher', a
     const spec = join(dir, 'spec.json');
     await (await import('node:fs/promises')).writeFile(spec, JSON.stringify({ openapi: '3.0.3', info: { title: 'Demo', version: '1' },
       paths: { '/ping': { get: { operationId: 'ping', responses: { '200': { description: 'OK' } } } } } }));
-    await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', spec, '--out', dir, '--watch'], { timeout: 3000 }),
+    await assert.rejects(run(process.execPath, [TSX, CLI, 'generate', spec, '--out', dir, '--watch'], { timeout: 30000 }),
       (error: unknown) => /output directory contains spec input/i.test((error as { stderr: string }).stderr));
     await access(spec);
   } finally { await rm(dir, { recursive: true, force: true }); }

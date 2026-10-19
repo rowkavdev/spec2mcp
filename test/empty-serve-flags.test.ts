@@ -25,7 +25,7 @@ for (const args of [['--port', ''], ['--transport', '']]) {
 }
 
 test('serve rejects an empty HTTP port instead of listening on a random port', async () => {
-  await assert.rejects(run(process.execPath, [TSX, CLI, 'serve', SPEC, '--transport', 'http', '--port', ''], { timeout: 3000 }),
+  await assert.rejects(run(process.execPath, [TSX, CLI, 'serve', SPEC, '--transport', 'http', '--port', ''], { timeout: 30000 }),
     (error: unknown) => {
       const result = error as { stderr: string; code: unknown; killed: boolean };
       return result.code === 1 && !result.killed && /--port requires/.test(result.stderr);

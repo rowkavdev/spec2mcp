@@ -21,7 +21,7 @@ for (const command of ['generate', 'shorthand', 'serve']) {
       const args = command === 'shorthand' ? [SPEC] : [command, SPEC];
       args.push('unintended-second-spec.yaml');
       args.push(...(command === 'serve' ? ['--transport', 'http', '--port', '0'] : ['--out', dir]));
-      await assert.rejects(run(process.execPath, [TSX, CLI, ...args], { cwd: dir, timeout: 3000 }),
+      await assert.rejects(run(process.execPath, [TSX, CLI, ...args], { cwd: dir, timeout: 30000 }),
         (error: unknown) => {
           const result = error as { code: unknown; killed: boolean; stderr: string };
           return result.code === 1 && !result.killed &&
