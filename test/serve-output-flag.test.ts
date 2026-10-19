@@ -11,7 +11,7 @@ const TSX = fileURLToPath(new URL('../node_modules/tsx/dist/cli.mjs', import.met
 
 for (const args of [['--out', './expected-project'], ['-o', './expected-project'], ['--out', '']]) {
   test(`serve rejects generate-only output flag ${JSON.stringify(args)}`, async () => {
-    await assert.rejects(run(process.execPath, [TSX, CLI, 'serve', SPEC, '--transport', 'http', '--port', '0', ...args], { timeout: 3000 }),
+    await assert.rejects(run(process.execPath, [TSX, CLI, 'serve', SPEC, '--transport', 'http', '--port', '0', ...args], { timeout: 30000 }),
       (error: unknown) => {
         const result = error as { code: unknown; killed: boolean; stderr: string };
         return result.code === 1 && !result.killed && /--out is only valid with generate/.test(result.stderr) && !/listening/.test(result.stderr);

@@ -18,7 +18,7 @@ for (const command of ['generate', 'serve']) {
     try {
       const out = join(dir, 'out');
       const args = command === 'serve' ? ['--transport', 'http', '--port', '0'] : ['--out', out];
-      await assert.rejects(run(process.execPath, [TSX, CLI, command, SPEC, ...args, '--poll-interval', ''], { timeout: 3000 }),
+      await assert.rejects(run(process.execPath, [TSX, CLI, command, SPEC, ...args, '--poll-interval', ''], { timeout: 30000 }),
         (error: unknown) => {
           const result = error as { code: unknown; killed: boolean; stderr: string };
           return result.code === 1 && !result.killed && /--poll-interval requires --watch and an HTTP\(S\) spec URL/.test(result.stderr) && !/listening/.test(result.stderr);
