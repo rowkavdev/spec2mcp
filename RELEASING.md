@@ -1,8 +1,9 @@
 # Releasing
 
-spec2mcp is published to npm as `spec2mcp` from the GitHub release flow. There
-are no manual publishes: a maintainer cuts a GitHub release and the
-[Publish workflow](.github/workflows/publish.yml) does the rest.
+spec2mcp is published to npm as `spec2mcp`. A maintainer runs the
+[Release workflow](.github/workflows/release.yml) from GitHub Actions when
+the release is approved. Creating a tag or publishing a GitHub release
+does not start the workflow.
 
 ## Version strategy
 
@@ -25,9 +26,10 @@ are no manual publishes: a maintainer cuts a GitHub release and the
 3. Push the branch and the tag: `git push && git push --tags`.
 4. Create a GitHub release from the `vX.Y.Z` tag. Paste the new changelog
    section as the release notes.
-5. Publishing the release triggers the Publish workflow, which installs
-   dependencies with `npm ci`, runs the test suite, and only then publishes.
-   The released package is exactly what CI validated for the tagged commit.
+5. In GitHub Actions, select **Release** and run it manually against the
+   release tag. Verify the selected ref before starting the job. It runs
+   typecheck, builds the CLI, and tests the tagged commit before publishing
+   that version to npm.
 
 If the publish step fails, do not retry it blindly: npm accepts a given
 `name@version` exactly once. Fix the cause, bump to the next patch version,
@@ -44,17 +46,15 @@ For this to work:
 
 - The npm package `spec2mcp` must have a trusted publisher configured for the
   `rowkavdev/spec2mcp` GitHub repository, pointing at the
-  `.github/workflows/publish.yml` workflow. That setup lives on npmjs.com and
+  `.github/workflows/release.yml` workflow. That setup lives on npmjs.com and
   is done once, outside this repository.
 - The job needs `permissions: id-token: write` so Actions can issue the OIDC
   token. The workflow also sets `contents: read` and nothing more.
-- Trusted publishing requires npm CLI 11.5.1 or later. Node 22 ships an older
-  npm, so the workflow upgrades npm before publishing.
+- Trusted publishing requires npm CLI 11.5.1 or later. The workflow upgrades
+  npm before publishing.
 - The publish runs with `--provenance`, so each released version carries a
   provenance attestation linking it back to the exact commit and workflow run
   on GitHub.
 
-Because authentication is tied to this repository and this workflow file,
-publishing from anywhere else (a fork, a local machine, a renamed workflow) is
-rejected by npm. If the workflow file is renamed, update the trusted publisher
+The trusted publishing identity is scoped to this repository and workflow file. If the workflow file is renamed, update the trusted publisher
 on npm to match before the next release.
