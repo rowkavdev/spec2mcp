@@ -95,6 +95,7 @@ export class Forge {
    * Files buffered by `emit()`, drained by `transform()`.
    */
   readonly #files: SourceFile[] = [];
+  #transforming = false;
 
   constructor(openapi: OpenAPIV3.Document) {
     this.#openapi = openapi;
@@ -198,15 +199,21 @@ export class Forge {
    * file that was produced as a `SourceFile[]`.
    *
    * The buffer is cleared after this call so the same Forge instance can be
-   * reused for another transformer. Pass the returned array to `finalize()`
+   * reused for another transformer. Overlapping calls on the same Forge
+   * instance are rejected. Pass the returned array to `finalize()`
    * to write the files to disk.
    */
   async transform(fn: TransformerFn): Promise<SourceFile[]> {
+    if (this.#transforming) {
+      throw new Error('A transform is already running on this Forge instance');
+    }
+    this.#transforming = true;
     try {
       await fn(this);
       return [...this.#files];
     } finally {
       this.#files.length = 0;
+      this.#transforming = false;
     }
   }
 

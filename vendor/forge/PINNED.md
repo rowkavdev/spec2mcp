@@ -16,6 +16,8 @@ vendored diff before committing; keep attribution and the license.
 
 ## Deviations from verbatim
 
+- forge.ts: overlapping transforms on one instance reject before they can
+  change the active transform's emitted files (#341).
 - forge.ts: finalize writes through a temp file renamed over the destination
   and unlinks symlinked ancestors inside the output directory, so a symlink
   planted at an owned output path cannot redirect a write outside it (#213).
