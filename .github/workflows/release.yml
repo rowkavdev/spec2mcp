@@ -4,12 +4,16 @@ name: Release
 # publisher for this package matches on this filename (release.yml); the
 # trusted-publishing token exchange replaces a long-lived npm token.
 #
-# Deliberately manual-only (workflow_dispatch): no push, tag, or release
-# event fires this. Rowan's initial 0.1.0 publish happens by hand first;
-# this workflow must not be able to beat it to the registry.
+# Manual runs rehearse package creation by default. A maintainer must opt
+# in to publishing and select a release tag matching package.json.
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the selected release tag to npm
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -24,7 +28,6 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          # Latest Node 22.x (>= 22.14.0, the floor for trusted publishing).
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
@@ -32,7 +35,20 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-      # Trusted publishing needs npm CLI 11.5.1 or later; the CLI bundled
-      # with Node 22 is older, so update it before publishing.
+      - name: Rehearse package creation
+        if: ${{ !inputs.publish }}
+        run: npm pack --dry-run --ignore-scripts
+
+      - name: Verify the release tag
+        if: ${{ inputs.publish }}
+        run: |
+          expected="v$(node -p 'require("./package.json").version')"
+          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF_NAME" != "$expected" ]]; then
+            echo "::error::Select release tag $expected before publishing."
+            exit 1
+          fi
+      # Trusted publishing needs npm CLI 11.5.1 or later.
       - run: npm install -g npm@latest
+        if: ${{ inputs.publish }}
       - run: npm publish --provenance --access public
+        if: ${{ inputs.publish }}
