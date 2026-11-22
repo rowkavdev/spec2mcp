@@ -26,10 +26,14 @@ does not start the workflow.
 3. Push the branch and the tag: `git push && git push --tags`.
 4. Create a GitHub release from the `vX.Y.Z` tag. Paste the new changelog
    section as the release notes.
-5. In GitHub Actions, select **Release** and run it manually against the
-   release tag. Verify the selected ref before starting the job. It runs
-   typecheck, builds the CLI, and tests the tagged commit before publishing
-   that version to npm.
+5. Run the **Release** workflow against the release tag with **Publish**
+   enabled. For example, run `gh workflow run Release --ref vX.Y.Z -f publish=true`.
+   The workflow runs typecheck, builds the CLI, and tests the tagged commit.
+   It checks that the tag matches the package version before publishing.
+
+To rehearse, run **Release** on the branch you want to test and leave **Publish**
+disabled. After the same checks, the workflow previews the contents of the npm
+package without uploading it.
 
 If the publish step fails, do not retry it blindly: npm accepts a given
 `name@version` exactly once. Fix the cause, bump to the next patch version,
