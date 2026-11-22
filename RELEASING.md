@@ -56,5 +56,6 @@ For this to work:
   provenance attestation linking it back to the exact commit and workflow run
   on GitHub.
 
-The trusted publishing identity is scoped to this repository and workflow file. If the workflow file is renamed, update the trusted publisher
-on npm to match before the next release.
+The trusted publishing identity is scoped to this repository and workflow
+file. If the workflow file is renamed, update the trusted publisher on npm
+to match before the next release.
